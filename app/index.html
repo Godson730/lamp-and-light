@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#7a3b2e">
+  <title>Lamp &amp; Light — Bible Study Guide</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="28" height="28">
+      <span>Lamp &amp; Light</span>
+    </div>
+    <button class="icon-btn" id="openSettings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Zm7.43-2.53a7.8 7.8 0 0 0 0-1.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.3 7.3 0 0 0-1.68-.98l-.36-2.54A.5.5 0 0 0 14.13 2h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.6.25-1.17.57-1.68.98l-2.39-.96a.5.5 0 0 0-.61.22L2.83 8.52a.5.5 0 0 0 .12.64l2.03 1.58a7.8 7.8 0 0 0 0 1.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.3.61.22l2.39-.96c.51.4 1.08.73 1.68.98l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.6-.25 1.17-.58 1.68-.98l2.39.96c.22.08.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58Z"/></svg>
+    </button>
+  </header>
+
+  <main id="app">
+    <!-- TODAY -->
+    <section class="view" id="view-today" data-view="today">
+      <p class="eyebrow" id="todayDate"></p>
+      <h1 class="greeting" id="greeting">Good day</h1>
+
+      <article class="card verse-card">
+        <p class="eyebrow">Verse of the day</p>
+        <blockquote class="scripture" id="votdText"></blockquote>
+        <div class="row between">
+          <button class="link" id="votdRef"></button>
+          <button class="btn ghost small" id="votdShare">Copy</button>
+        </div>
+      </article>
+
+      <article class="card" id="todayFast"></article>
+
+      <article class="card">
+        <p class="eyebrow">This week's study</p>
+        <h2 id="todayStudyTitle"></h2>
+        <p class="muted" id="todayStudyRef"></p>
+        <div class="progress"><span id="todayStudyBar"></span></div>
+        <div class="row between">
+          <span class="muted small" id="todayStudyProgress"></span>
+          <button class="btn" data-goto="study">Open study</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Next reminder</p>
+        <div class="row between">
+          <div>
+            <h3 id="nextAlarmLabel">No reminders set</h3>
+            <p class="muted small" id="nextAlarmWhen"></p>
+          </div>
+          <button class="btn ghost" data-goto="alarms">Manage</button>
+        </div>
+        <p class="notice small" id="notifPrompt" hidden>
+          Notifications are off. <button class="link" id="enableNotifInline">Turn them on</button> so reminders can alert you.
+        </p>
+      </article>
+
+      <article class="card" id="continueReading" hidden>
+        <p class="eyebrow">Continue reading</p>
+        <div class="row between">
+          <h3 id="continueRef"></h3>
+          <button class="btn" data-goto="bible">Read</button>
+        </div>
+      </article>
+    </section>
+
+    <!-- BIBLE -->
+    <section class="view" id="view-bible" data-view="bible" hidden>
+      <div class="bible-controls">
+        <form class="search" id="refForm" autocomplete="off">
+          <input id="refInput" type="search" placeholder="Go to… e.g. John 3:16 or Psalm 23" aria-label="Go to Bible reference">
+          <button class="btn" type="submit">Go</button>
+        </form>
+        <div class="row gap">
+          <select id="bookSelect" aria-label="Book"></select>
+          <select id="chapterSelect" aria-label="Chapter"></select>
+          <span class="pill" id="translationPill">KJV</span>
+        </div>
+      </div>
+
+      <div class="reader-head">
+        <button class="icon-btn" id="prevChapter" aria-label="Previous chapter">‹</button>
+        <h1 id="chapterTitle">Genesis 1</h1>
+        <button class="icon-btn" id="nextChapter" aria-label="Next chapter">›</button>
+      </div>
+
+      <div class="reader" id="reader" aria-live="polite"></div>
+      <p class="muted small center">Tap a verse to highlight or bookmark it.</p>
+
+      <details class="card" id="chapterNotesBox">
+        <summary>My notes on this chapter</summary>
+        <textarea id="chapterNotes" rows="5" placeholder="What is God saying to you in this chapter?"></textarea>
+        <p class="muted small" id="chapterNotesSaved"></p>
+      </details>
+
+      <details class="card">
+        <summary>Bookmarks &amp; highlights <span class="count" id="bookmarkCount">0</span></summary>
+        <ul class="list" id="bookmarkList"></ul>
+      </details>
+    </section>
+
+    <!-- STUDY -->
+    <section class="view" id="view-study" data-view="study" hidden>
+      <div class="row between">
+        <p class="eyebrow" id="studyWeekLabel"></p>
+        <select id="lessonSelect" aria-label="Choose lesson"></select>
+      </div>
+      <h1 id="lessonTitle"></h1>
+      <p class="lead" id="lessonSummary"></p>
+
+      <article class="card">
+        <p class="eyebrow">Read the passage</p>
+        <div class="row between">
+          <h3 id="lessonPassage"></h3>
+          <button class="btn" id="lessonOpenPassage">Open in Bible</button>
+        </div>
+        <blockquote class="scripture small" id="lessonKeyVerse"></blockquote>
+      </article>
+
+      <ol class="steps" id="lessonSteps"></ol>
+
+      <article class="card">
+        <p class="eyebrow">Journal</p>
+        <textarea id="lessonNotes" rows="6" placeholder="Write your answers, insights and prayers here…"></textarea>
+        <p class="muted small" id="lessonNotesSaved"></p>
+      </article>
+    </section>
+
+    <!-- FAST -->
+    <section class="view" id="view-fast" data-view="fast" hidden>
+      <p class="eyebrow">Weekly fasting &amp; prayer</p>
+      <h1 id="fastTitle"></h1>
+      <p class="lead" id="fastFocus"></p>
+
+      <article class="card fast-status" id="fastStatus"></article>
+
+      <article class="card">
+        <p class="eyebrow">Scriptures to meditate on</p>
+        <div class="chips" id="fastScriptures"></div>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Prayer points</p>
+        <ul class="checklist" id="fastPrayerPoints"></ul>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Your fasting-day schedule</p>
+        <ol class="timeline" id="fastSchedule"></ol>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">Fasting journal</p>
+        <textarea id="fastJournal" rows="5" placeholder="Record what you prayed for, what you sensed, and answers to prayer…"></textarea>
+        <p class="muted small" id="fastJournalSaved"></p>
+      </article>
+
+      <details class="card" open>
+        <summary>My fasting plan</summary>
+        <div class="form-grid">
+          <label>Fasting day
+            <select id="fastDay"></select>
+          </label>
+          <label>Type of fast
+            <select id="fastType"></select>
+          </label>
+          <label>Start
+            <input type="time" id="fastStart">
+          </label>
+          <label>Break the fast
+            <input type="time" id="fastEnd">
+          </label>
+        </div>
+        <p class="muted small" id="fastTypeInfo"></p>
+        <label class="switch-row">
+          <input type="checkbox" id="fastRemind">
+          <span>Remind me at the start, at midday and when it's time to break the fast</span>
+        </label>
+      </details>
+
+      <details class="card">
+        <summary>How to fast well</summary>
+        <ul class="bullets" id="fastTips"></ul>
+      </details>
+
+      <details class="card">
+        <summary>Past fasts <span class="count" id="fastHistoryCount">0</span></summary>
+        <ul class="list" id="fastHistory"></ul>
+      </details>
+    </section>
+
+    <!-- ALARMS -->
+    <section class="view" id="view-alarms" data-view="alarms" hidden>
+      <p class="eyebrow">Notifications &amp; alarms</p>
+      <h1>Reminders</h1>
+
+      <article class="card" id="permissionCard">
+        <div class="row between">
+          <div>
+            <h3>Notifications</h3>
+            <p class="muted small" id="permissionText"></p>
+          </div>
+          <button class="btn" id="enableNotif">Enable</button>
+        </div>
+        <p class="notice small" id="exactPrompt" hidden>
+          Reminders may arrive a few minutes late until you allow on-time alarms.
+          <button class="link" id="allowExact">Allow on-time alarms</button>
+        </p>
+        <div class="row gap wrap">
+          <button class="btn ghost small" id="testAlarm">Test alarm</button>
+          <button class="btn ghost small" id="exportIcs">Add to phone calendar (.ics)</button>
+        </div>
+        <p class="muted small" id="alarmHelp"></p>
+      </article>
+
+      <ul class="alarm-list" id="alarmList"></ul>
+
+      <details class="card" id="newAlarmBox">
+        <summary>Add a reminder</summary>
+        <form id="alarmForm" class="form-grid">
+          <label class="span-2">Label
+            <input id="alarmLabel" required maxlength="60" placeholder="e.g. Morning devotion">
+          </label>
+          <label>Time
+            <input type="time" id="alarmTime" required value="06:00">
+          </label>
+          <label>Type
+            <select id="alarmKind">
+              <option value="prayer">Prayer</option>
+              <option value="study">Bible study</option>
+              <option value="fast">Fasting</option>
+            </select>
+          </label>
+          <fieldset class="span-2 days" id="alarmDays">
+            <legend>Repeat on</legend>
+          </fieldset>
+          <button class="btn span-2" type="submit">Save reminder</button>
+        </form>
+      </details>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Main">
+    <button data-tab="today" class="active"><span class="ti">☀</span>Today</button>
+    <button data-tab="bible"><span class="ti">📖</span>Bible</button>
+    <button data-tab="study"><span class="ti">✎</span>Study</button>
+    <button data-tab="fast"><span class="ti">🕊</span>Fast</button>
+    <button data-tab="alarms"><span class="ti">⏰</span>Alarms</button>
+  </nav>
+
+  <!-- Verse action sheet -->
+  <dialog id="verseSheet" class="sheet">
+    <form method="dialog">
+      <p class="eyebrow" id="verseSheetRef"></p>
+      <p class="scripture small" id="verseSheetText"></p>
+      <div class="swatches" id="swatches">
+        <button value="yellow" class="sw yellow" aria-label="Yellow highlight"></button>
+        <button value="green" class="sw green" aria-label="Green highlight"></button>
+        <button value="blue" class="sw blue" aria-label="Blue highlight"></button>
+        <button value="pink" class="sw pink" aria-label="Pink highlight"></button>
+        <button value="none" class="sw none" aria-label="Remove highlight">✕</button>
+      </div>
+      <div class="row gap wrap">
+        <button value="bookmark" class="btn" id="verseBookmarkBtn">Bookmark</button>
+        <button value="copy" class="btn ghost">Copy</button>
+        <button value="close" class="btn ghost">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Alarm ringing -->
+  <dialog id="alarmRing" class="ring">
+    <div class="ring-body">
+      <div class="bell" aria-hidden="true">⏰</div>
+      <p class="eyebrow" id="ringTime"></p>
+      <h2 id="ringLabel"></h2>
+      <p class="scripture small" id="ringVerse"></p>
+      <div class="row gap center">
+        <button class="btn ghost" id="ringSnooze">Snooze 5 min</button>
+        <button class="btn" id="ringStop">I'm ready</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Settings -->
+  <dialog id="settings" class="sheet">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <div class="form-grid">
+        <label class="span-2">Bible translation
+          <select id="setTranslation">
+            <option value="kjv">King James Version (KJV)</option>
+            <option value="web">World English Bible (modern English)</option>
+          </select>
+        </label>
+        <label>Theme
+          <select id="setTheme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label>Text size
+          <input type="range" id="setFont" min="15" max="26" step="1">
+        </label>
+        <label class="span-2">Your name (for greetings)
+          <input id="setName" maxlength="40" placeholder="Optional">
+        </label>
+      </div>
+      <p class="muted small">
+        <strong>About the NKJV:</strong> the New King James Version is copyrighted by HarperCollins Christian Publishing and
+        can only be included in an app with their permission. Lamp &amp; Light uses the public-domain KJV and WEB texts. If you
+        obtain an NKJV license, a licensed text source can be added as another translation option.
+      </p>
+      <p class="muted small">The complete Bible is built into the app and works fully offline. Scripture texts: King James Version and World English Bible, both public domain, from eBible.org.</p>
+      <details class="muted small">
+        <summary><strong>Privacy</strong></summary>
+        <p>Lamp &amp; Light has no accounts, ads or analytics, and never sends your information anywhere. Your notes, highlights,
+        fasting records and reminders are stored only on this device. Notifications are scheduled by your device itself.
+        Using “Reset all data” removes everything.</p>
+      </details>
+      <div class="row between wrap notice small">
+        <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
+        <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
+      </div>
+      <p class="muted small">Version <span id="appVersion">1.0.0</span></p>
+      <div class="row between">
+        <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
+        <button value="close" class="btn">Done</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="capacitor.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
