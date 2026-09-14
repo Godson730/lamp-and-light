@@ -92,7 +92,12 @@
       </div>
 
       <div class="reader" id="reader" aria-live="polite"></div>
-      <p class="muted small center">Tap a verse to highlight or bookmark it.</p>
+      <p class="muted small center">Tap a verse to highlight, bookmark or read its commentary.</p>
+
+      <details class="card" id="commentaryBox">
+        <summary>Commentary on this chapter <span class="count">JFB</span></summary>
+        <div id="commentaryBody" class="commentary"></div>
+      </details>
 
       <details class="card" id="chapterNotesBox">
         <summary>My notes on this chapter</summary>
@@ -119,7 +124,10 @@
         <p class="eyebrow">Read the passage</p>
         <div class="row between">
           <h3 id="lessonPassage"></h3>
-          <button class="btn" id="lessonOpenPassage">Open in Bible</button>
+          <div class="row gap wrap">
+            <button class="btn ghost" id="lessonCommentary">Commentary</button>
+            <button class="btn" id="lessonOpenPassage">Open in Bible</button>
+          </div>
         </div>
         <blockquote class="scripture small" id="lessonKeyVerse"></blockquote>
       </article>
@@ -268,8 +276,22 @@
         <button value="none" class="sw none" aria-label="Remove highlight">✕</button>
       </div>
       <div class="row gap wrap">
-        <button value="bookmark" class="btn" id="verseBookmarkBtn">Bookmark</button>
+        <button value="commentary" class="btn">Commentary</button>
+        <button value="bookmark" class="btn ghost" id="verseBookmarkBtn">Bookmark</button>
         <button value="copy" class="btn ghost">Copy</button>
+        <button value="close" class="btn ghost">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Commentary note -->
+  <dialog id="noteSheet" class="sheet">
+    <form method="dialog">
+      <p class="eyebrow">Jamieson-Fausset-Brown Commentary</p>
+      <h2 id="noteRef"></h2>
+      <div class="commentary scroll" id="noteText"></div>
+      <div class="row gap wrap">
+        <button value="chapter" class="btn">Whole chapter</button>
         <button value="close" class="btn ghost">Close</button>
       </div>
     </form>
@@ -319,7 +341,8 @@
         can only be included in an app with their permission. Lamp &amp; Light uses the public-domain KJV and WEB texts. If you
         obtain an NKJV license, a licensed text source can be added as another translation option.
       </p>
-      <p class="muted small">The complete Bible is built into the app and works fully offline. Scripture texts: King James Version and World English Bible, both public domain, from eBible.org.</p>
+      <p class="muted small">The complete Bible is built into the app and works fully offline. Scripture texts: King James Version and World English Bible, both public domain, from eBible.org.
+        Commentary: Jamieson, Fausset &amp; Brown, <em>Commentary Critical and Explanatory on the Whole Bible</em> (1871), public domain, via the Free Use Bible API (bible.helloao.org).</p>
       <details class="muted small">
         <summary><strong>Privacy</strong></summary>
         <p>Lamp &amp; Light has no accounts, ads or analytics, and never sends your information anywhere. Your notes, highlights,
@@ -330,7 +353,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">1.0.0</span></p>
+      <p class="muted small">Version <span id="appVersion">1.1.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>

@@ -170,7 +170,10 @@
     const g = e.target.closest("[data-goto]");
     if (g) show(g.dataset.goto);
     const r = e.target.closest("[data-ref]");
-    if (r) openRef(r.dataset.ref);
+    if (r) {
+      $$("dialog[open]").forEach(d => { d.returnValue = ""; d.close(); });
+      openRef(r.dataset.ref);
+    }
   });
   window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 
@@ -281,7 +284,17 @@
           const el = reader.querySelector(`[data-verse="${n}"]`);
           if (el) { el.classList.add("focus"); first = first || el; }
         }
-        if (first) setTimeout(() => first.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+        if (first && pendingCommentary == null) setTimeout(() => first.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+      }
+      if (pendingCommentary != null) {
+        const verse = pendingCommentary; pendingCommentary = null;
+        $("#commentaryBox").open = true;
+        await renderCommentary();
+        const notes = $$("#commentaryBody .note");
+        const target = notes.find(n => +n.dataset.verse >= verse) || notes[0] || $("#commentaryBox");
+        setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+      } else if ($("#commentaryBox").open) {
+        renderCommentary();
       }
     } catch (err) {
       if (token !== loadToken) return;
@@ -342,8 +355,9 @@
   $("#reader").addEventListener("keydown", e => {
     if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("verse")) { e.preventDefault(); openVerse(e.target); }
   });
-  sheet.addEventListener("close", () => {
-    const action = sheet.returnValue;
+  // Act on the tapped button right away (the form's submit event), rather than waiting for the dialog's close event.
+  sheet.querySelector("form").addEventListener("submit", e => {
+    const action = e.submitter?.value;
     if (!sheetVerse || !action || action === "close") return;
     const { ref, text } = sheetVerse;
     if (["yellow", "green", "blue", "pink"].includes(action)) state.highlights[ref] = action;
@@ -353,6 +367,7 @@
       if (i >= 0) state.bookmarks.splice(i, 1);
       else { state.bookmarks.unshift({ ref, text, at: Date.now() }); toast("Bookmarked"); }
     } else if (action === "copy") { copyText(`“${text}” — ${ref} (${state.translation.toUpperCase()})`); return; }
+    else if (action === "commentary") { showVerseNote(state.last.book, state.last.chapter, +ref.split(":")[1]); return; }
     save();
     const el = $(`#reader [data-verse="${ref.split(":")[1]}"]`);
     if (el) {
@@ -361,6 +376,126 @@
     }
     renderBookmarks();
   });
+
+  /* ----- Commentary: Jamieson-Fausset-Brown, bible/commentary/jfb/<book#>.json ----- */
+  const commentaryCache = new Map();
+  function loadCommentary(bookName) {
+    if (!commentaryCache.has(bookName)) {
+      const n = BOOKS.findIndex(b => b.name === bookName) + 1;
+      const p = fetch(`bible/commentary/jfb/${n}.json`).then(res => {
+        if (!res.ok) throw new Error("Commentary unavailable");
+        return res.json();
+      });
+      commentaryCache.set(bookName, p);
+      p.catch(() => commentaryCache.delete(bookName));
+    }
+    return commentaryCache.get(bookName);
+  }
+  // JFB's own abbreviations ("Joh 3:16") → our book names, so cross-references become tappable
+  const JFB_BOOKS = {
+    Gen: "Genesis", Exo: "Exodus", Lev: "Leviticus", Num: "Numbers", Deu: "Deuteronomy", Jos: "Joshua", Jdg: "Judges",
+    Rut: "Ruth", Ezr: "Ezra", Ezra: "Ezra", Neh: "Nehemiah", Est: "Esther", Job: "Job", Psa: "Psalms", Pro: "Proverbs",
+    Ecc: "Ecclesiastes", Sol: "Song of Solomon", Isa: "Isaiah", Jer: "Jeremiah", Lam: "Lamentations", Eze: "Ezekiel",
+    Dan: "Daniel", Hos: "Hosea", Joe: "Joel", Joel: "Joel", Amo: "Amos", Oba: "Obadiah", Jon: "Jonah", Mic: "Micah",
+    Nah: "Nahum", Hab: "Habakkuk", Zep: "Zephaniah", Hag: "Haggai", Zac: "Zechariah", Mal: "Malachi", Mat: "Matthew",
+    Mar: "Mark", Mark: "Mark", Luk: "Luke", Luke: "Luke", Joh: "John", John: "John", Act: "Acts", Acts: "Acts",
+    Rom: "Romans", Gal: "Galatians", Eph: "Ephesians", Phi: "Philippians", Col: "Colossians", Tit: "Titus",
+    Plm: "Philemon", Heb: "Hebrews", Jam: "James", Jde: "Jude", Rev: "Revelation"
+  };
+  const JFB_REF = new RegExp(`\\b(${Object.keys(JFB_BOOKS).join("|")}) (\\d{1,3}):(\\d{1,3})(?:-(\\d{1,3}))?`, "g");
+  function formatCommentary(text) {
+    return text.split(/\n{2,}/).map(par => {
+      let html = escapeHtml(par.trim());
+      if (!html) return "";
+      // JFB opens most paragraphs with the Bible words being explained, followed by "--"
+      html = html.replace(/^(.{1,90}?)--/, "<strong>$1</strong> — ").replace(/--/g, " — ");
+      html = html.replace(JFB_REF, (m, abbr, ch, v1, v2) => {
+        const book = BOOKS.find(b => b.name === JFB_BOOKS[abbr]);
+        if (!book || +ch > book.chapters) return m;
+        return `<button type="button" class="link ref" data-ref="${book.name} ${ch}:${v1}${v2 ? "-" + v2 : ""}">${m}</button>`;
+      });
+      return `<p>${html.replace(/\n/g, "<br>")}</p>`;
+    }).join("");
+  }
+  async function renderCommentary() {
+    const { book, chapter } = state.last;
+    const body = $("#commentaryBody");
+    const key = `${book} ${chapter}`;
+    if (body.dataset.key === key) return;
+    body.dataset.key = key;
+    body.innerHTML = `<p class="loading">Loading commentary…</p>`;
+    try {
+      const data = await loadCommentary(book);
+      if (body.dataset.key !== key) return;
+      const ch = data.ch[chapter];
+      let html = "";
+      if (chapter === 1 && data.intro) {
+        html += `<details class="intro"><summary>Introduction to ${escapeHtml(book)}</summary>${formatCommentary(data.intro)}</details>`;
+      }
+      if (!ch) {
+        html += `<p class="muted">Jamieson-Fausset-Brown has no commentary on ${escapeHtml(key)}.</p>`;
+      } else {
+        if (ch.intro) html += `<div class="chapter-intro">${formatCommentary(ch.intro)}</div>`;
+        html += ch.notes.map(([v, t]) => `
+          <article class="note" data-verse="${v}">
+            <h4><button type="button" class="verse-jump" data-jump="${v}">Verse ${v}</button></h4>
+            ${formatCommentary(t)}
+          </article>`).join("");
+      }
+      body.innerHTML = html + `<p class="muted small credit">Jamieson, Fausset &amp; Brown (1871) · public domain</p>`;
+    } catch (e) {
+      body.dataset.key = "";
+      body.innerHTML = `<p class="error">Couldn't open the commentary. Please try again.</p>`;
+    }
+  }
+  $("#commentaryBox").addEventListener("toggle", () => { if ($("#commentaryBox").open) renderCommentary(); });
+  $("#commentaryBody").addEventListener("click", e => {
+    const j = e.target.closest("[data-jump]");
+    if (!j) return;
+    const el = $(`#reader [data-verse="${j.dataset.jump}"]`);
+    if (!el) return;
+    $$("#reader .verse.focus").forEach(v => v.classList.remove("focus"));
+    el.classList.add("focus");
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+
+  const noteSheet = $("#noteSheet");
+  async function showVerseNote(book, chapter, verse) {
+    $("#noteRef").textContent = `${book} ${chapter}:${verse}`;
+    $("#noteText").innerHTML = `<p class="loading">Loading…</p>`;
+    noteSheet.returnValue = "";
+    if (!noteSheet.open) noteSheet.showModal();
+    try {
+      const ch = (await loadCommentary(book)).ch[chapter];
+      const notes = ch ? ch.notes : [];
+      const exact = notes.find(([v]) => v === verse);
+      // JFB often explains a group of verses under the first one, so fall back to the closest earlier note
+      const earlier = notes.filter(([v]) => v < verse && verse - v <= 4).pop();
+      const note = exact || earlier;
+      $("#noteText").scrollTop = 0;
+      $("#noteText").innerHTML = note
+        ? (exact ? "" : `<p class="muted small">No note on verse ${verse} itself. Here is the note on verse ${note[0]}:</p>`) + formatCommentary(note[1])
+        : `<p class="muted">There's no note on this verse. Tap <strong>Whole chapter</strong> to read the commentary on ${escapeHtml(book)} ${chapter}.</p>`;
+      noteSheet.dataset.verse = note ? note[0] : verse;
+    } catch (e) {
+      $("#noteText").innerHTML = `<p class="error">Couldn't open the commentary.</p>`;
+    }
+  }
+  noteSheet.querySelector("form").addEventListener("submit", e => {
+    if (e.submitter?.value !== "chapter") return;
+    $("#commentaryBox").open = true;
+    renderCommentary().then(() => {
+      const target = $(`#commentaryBody .note[data-verse="${noteSheet.dataset.verse}"]`) || $("#commentaryBox");
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+  let pendingCommentary = null;
+  function openCommentaryFor(refStr) {
+    const r = parseRef(refStr);
+    if (!r) return;
+    pendingCommentary = r.from || 1;
+    openRef(refStr);
+  }
 
   function renderBookmarks() {
     const refs = new Set([...state.bookmarks.map(b => b.ref), ...Object.keys(state.highlights)]);
@@ -412,6 +547,7 @@
     $("#lessonSummary").textContent = l.summary;
     $("#lessonPassage").textContent = l.passage;
     $("#lessonOpenPassage").dataset.ref = l.passage;
+    $("#lessonCommentary").onclick = () => openCommentaryFor(l.passage);
     const kv = $("#lessonKeyVerse");
     kv.textContent = `Key verse: ${l.keyVerse}`;
     verseText(l.keyVerse).then(t => { kv.textContent = `“${t}” — ${l.keyVerse}`; }).catch(() => {});

@@ -1,6 +1,6 @@
 /* Offline support + notification handling for Lamp & Light. */
-const SHELL = "lamp-light-shell-v2";
-const BIBLE = "lamp-light-bible-v2";
+const SHELL = "lamp-light-shell-v3";
+const BIBLE = "lamp-light-bible-v3";
 const ASSETS = ["./", "index.html", "styles.css", "data.js", "app.js", "icon.svg", "manifest.json"];
 
 self.addEventListener("install", event => {
@@ -37,7 +37,7 @@ self.addEventListener("fetch", event => {
   // App files: network-first so updates arrive, cache fallback when offline.
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: "no-cache" })   // always revalidate so app updates aren't hidden by the HTTP cache
         .then(res => { const copy = res.clone(); caches.open(SHELL).then(c => c.put(request, copy)); return res; })
         .catch(() => caches.match(request).then(r => r || caches.match("index.html")))
     );

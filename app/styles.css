@@ -171,6 +171,23 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; f
 .list .snippet { display: block; font-family: var(--serif); color: var(--muted); font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; border: 1px solid var(--line); }
 
+/* ---------- commentary ---------- */
+.commentary { font-family: var(--serif); font-size: calc(var(--reader-size) * .86); line-height: 1.7; }
+.commentary p { margin: 0 0 .8em; }
+.commentary strong { color: var(--accent); font-weight: 600; }
+.commentary .ref { font-family: var(--sans); font-size: .82em; font-weight: 600; text-decoration-thickness: 1px; }
+.commentary .note { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; scroll-margin-top: 80px; }
+.commentary .note h4 { margin: 0 0 6px; }
+.commentary .verse-jump {
+  font-family: var(--sans); font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--surface-2); color: var(--gold); border: 0; border-radius: 99px; padding: 3px 10px; cursor: pointer;
+}
+.commentary .chapter-intro { background: var(--surface-2); border-radius: 12px; padding: 12px 14px 2px; margin-bottom: 4px; }
+.commentary details.intro { margin-bottom: 12px; }
+.commentary details.intro summary { font-family: var(--sans); font-weight: 600; cursor: pointer; color: var(--accent); margin-bottom: 8px; }
+.commentary .credit { font-family: var(--sans); margin: 16px 0 0; }
+.commentary.scroll { max-height: min(58vh, 520px); overflow-y: auto; margin: 8px 0 16px; padding-right: 4px; overscroll-behavior: contain; }
+
 /* ---------- study ---------- */
 .steps { list-style: none; padding: 0; margin: 0 0 14px; counter-reset: step; }
 .steps li { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px 14px 58px; margin-bottom: 12px; box-shadow: var(--shadow); }
