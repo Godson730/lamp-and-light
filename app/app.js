@@ -30,6 +30,7 @@
     fast: { day: 3, type: "normal", start: "06:00", end: "18:00", remind: true },
     fastWeeks: {},           // weekKey -> {points:[bool], journal, done}
     fastHistory: [],         // [{week, date, title, type}]
+    plan: null,              // active reading plan, see READING PLAN section
     alarms: [
       { id: "a-morning", label: "Morning devotion", time: "06:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "study", enabled: true },
       { id: "a-evening", label: "Evening prayer", time: "21:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "prayer", enabled: true }
@@ -156,11 +157,11 @@
   }
 
   /* ================= navigation ================= */
-  const VIEWS = ["today", "bible", "study", "fast", "alarms"];
+  const VIEWS = ["today", "bible", "study", "fast", "alarms", "plan"];
   function show(view) {
     if (!VIEWS.includes(view)) view = "today";
     $$(".view").forEach(v => { v.hidden = v.dataset.view !== view; });
-    $$(".tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === view));
+    $$(".tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === (view === "plan" ? "today" : view)));
     if (location.hash.slice(1) !== view) history.replaceState(null, "", "#" + view);
     window.scrollTo({ top: 0 });
     render[view]();
@@ -230,6 +231,8 @@
     // continue reading
     $("#continueReading").hidden = false;
     $("#continueRef").textContent = `${state.last.book} ${state.last.chapter}`;
+
+    renderTodayPlan();
   };
   $("#votdShare").addEventListener("click", () => copyText(`“${$("#votdText").textContent}” — ${$("#votdRef").textContent}`));
   function relWhen(d) {
@@ -286,6 +289,7 @@
         }
         if (first && pendingCommentary == null) setTimeout(() => first.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
       }
+      renderPlanBar();
       if (pendingCommentary != null) {
         const verse = pendingCommentary; pendingCommentary = null;
         $("#commentaryBox").open = true;
@@ -524,6 +528,257 @@
     const [bc, v] = ref.split(":");
     if (bc === `${state.last.book} ${state.last.chapter}`) { const el = $(`#reader [data-verse="${v}"]`); if (el) el.className = "verse"; }
   });
+
+  /* ================= READING PLAN ================= */
+  // state.plan = { id, start: "YYYY-MM-DD", done: { "<day>": [bool per reading] }, current: { day, i } }
+  const planDef = () => state.plan && PLANS.find(p => p.id === state.plan.id);
+  const segLabel = ([b, c1, c2]) => `${BOOKS[b].name} ${c1 === c2 ? c1 : `${c1}–${c2}`}`;
+  const dayLabel = readings => readings.map(segLabel).join(" · ");
+  function parseDate(key) { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d); }
+  function planToday() {                       // which plan day the calendar says it is (1-based)
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.max(1, Math.round((today - parseDate(state.plan.start)) / 864e5) + 1);
+  }
+  const isRead = (day, i) => !!state.plan.done[day]?.[i];
+  const dayComplete = (plan, day) => plan.days[day - 1].every((_, i) => isRead(day, i));
+  function planStats(plan) {
+    const today = Math.min(planToday(), plan.days.length);
+    let completed = 0, firstUnread = null, behind = 0;
+    plan.days.forEach((_, idx) => {
+      const day = idx + 1;
+      if (dayComplete(plan, day)) completed++;
+      else {
+        if (firstUnread == null) firstUnread = day;
+        if (day < today) behind++;
+      }
+    });
+    // The day to read now: the earliest unfinished day, or today's if you're up to date
+    const focus = firstUnread == null ? null : firstUnread;
+    return { today, completed, behind, focus, finished: firstUnread == null };
+  }
+  function setRead(day, i, value) {
+    const plan = planDef();
+    const arr = state.plan.done[day] || (state.plan.done[day] = plan.days[day - 1].map(() => false));
+    arr[i] = value;
+    if (arr.every(v => !v)) delete state.plan.done[day];
+    save();
+  }
+  function openReading(day, i) {
+    const [b, c1] = planDef().days[day - 1][i];
+    state.plan.current = { day, i };
+    save();
+    openRef(`${BOOKS[b].name} ${c1}`);
+  }
+  function startPlan(id) {
+    state.plan = { id, start: dateKey(new Date()), done: {}, current: null };
+    save();
+    toast("Reading plan started. Day 1 is ready!");
+    render.plan();
+  }
+  function readingItems(plan, day) {
+    return plan.days[day - 1].map((seg, i) => `
+      <li class="${isRead(day, i) ? "read" : ""}">
+        <label class="check"><input type="checkbox" data-read="${day}:${i}" ${isRead(day, i) ? "checked" : ""} aria-label="Mark ${segLabel(seg)} as read"><span></span></label>
+        <button type="button" class="reading-link" data-open="${day}:${i}">${segLabel(seg)}</button>
+      </li>`).join("");
+  }
+
+  function renderTodayPlan() {
+    const card = $("#todayPlan"), plan = planDef();
+    if (!plan) {
+      card.innerHTML = `
+        <p class="eyebrow">Daily Bible reading</p>
+        <h2>Read through the Bible</h2>
+        <p class="muted">Pick a plan and read a little each day, from Bible in a Year to Proverbs in a Month.</p>
+        <button class="btn" data-goto="plan">Choose a reading plan</button>`;
+      return;
+    }
+    const s = planStats(plan);
+    if (s.finished) {
+      card.innerHTML = `<p class="eyebrow">Daily Bible reading</p><h2>${escapeHtml(plan.title)} complete! 🎉</h2>
+        <p class="muted">Well done. You finished all ${plan.days.length} days.</p><button class="btn" data-goto="plan">Start another plan</button>`;
+      return;
+    }
+    // If today's reading is already done, keep showing today (with a "read ahead" option) rather than tomorrow
+    const aheadDay = s.focus > s.today ? s.focus : null;
+    const day = aheadDay ? s.today : s.focus;
+    const allRead = dayComplete(plan, day);
+    const status = allRead ? `Done for today ✓` : day < s.today ? `Day ${day} · catching up` : `Day ${day} of ${plan.days.length}`;
+    const firstUnread = plan.days[day - 1].findIndex((_, i) => !isRead(day, i));
+    card.innerHTML = `
+      <p class="eyebrow">Today's reading · ${escapeHtml(plan.title)}</p>
+      <h2>${escapeHtml(status)}</h2>
+      ${day < s.today ? `<p class="muted small">Today is day ${s.today}. Pick up where you left off.</p>` : ""}
+      <ul class="reading-list">${readingItems(plan, day)}</ul>
+      <div class="progress"><span style="width:${Math.round(s.completed / plan.days.length * 100)}%"></span></div>
+      <div class="row between wrap">
+        <span class="muted small">${s.completed} of ${plan.days.length} days done · about ${plan.minutes} min a day</span>
+        <div class="row gap">
+          <button class="btn ghost small" data-goto="plan">Plan</button>
+          ${allRead
+            ? (aheadDay ? `<button class="btn ghost small" data-open="${aheadDay}:0">Read ahead</button>` : "")
+            : `<button class="btn small" data-open="${day}:${firstUnread}">${firstUnread > 0 ? "Continue" : "Start reading"}</button>`}
+        </div>
+      </div>`;
+  }
+
+  let showAllDays = false;
+  render.plan = () => {
+    const body = $("#planBody"), plan = planDef();
+    if (!plan) {
+      body.innerHTML = `
+        <h1>Choose a reading plan</h1>
+        <p class="lead">Read a portion each day. Readings are balanced so every day takes about the same time.</p>
+        ${PLANS.map(p => `
+          <article class="card plan-option">
+            <div class="row between wrap">
+              <div>
+                <h2>${escapeHtml(p.title)}</h2>
+                <p class="muted small">${p.days.length} days · about ${p.minutes} min a day</p>
+              </div>
+              <button class="btn" data-start-plan="${p.id}">Start</button>
+            </div>
+            <p>${escapeHtml(p.description)}</p>
+            <p class="muted small">Day 1: ${escapeHtml(dayLabel(p.days[0]))}</p>
+          </article>`).join("")}`;
+      return;
+    }
+    const s = planStats(plan);
+    const pct = Math.round(s.completed / plan.days.length * 100);
+    const reminder = state.alarms.find(a => a.id === "a-reading");
+    let html = `
+      <h1>${escapeHtml(plan.title)}</h1>
+      <article class="card">
+        <p class="big-number">${pct}%</p>
+        <p class="muted small">${s.completed} of ${plan.days.length} days completed · started ${parseDate(state.plan.start).toLocaleDateString([], { month: "short", day: "numeric" })}</p>
+        <div class="progress"><span style="width:${pct}%"></span></div>
+        ${s.finished ? `<p><strong>You finished the plan! 🎉</strong> “Thy word is a lamp unto my feet, and a light unto my path.”</p>`
+          : s.behind ? `<p class="notice small">You're ${s.behind} day${s.behind > 1 ? "s" : ""} behind. That's okay, just keep going.
+              <button class="link" id="planCatchUp">Reset my schedule to start from today</button></p>`
+          : `<p class="muted small">You're on track. Keep it up!</p>`}
+      </article>`;
+    if (!s.finished) {
+      const day = s.focus;
+      html += `
+        <article class="card">
+          <p class="eyebrow">${day === s.today ? "Today" : day < s.today ? "Next to read" : "Reading ahead"} · Day ${day}</p>
+          <ul class="reading-list">${readingItems(plan, day)}</ul>
+          <p class="muted small">Tap a reading to open it. Mark it read at the end of the chapter, or tick it here.</p>
+        </article>
+        <article class="card">
+          <p class="eyebrow">Coming up</p>
+          <ul class="day-list">${plan.days.slice(day, day + 5).map((d, k) => `
+            <li><span class="day-num">Day ${day + k + 1}</span><span>${escapeHtml(dayLabel(d))}</span></li>`).join("") || `<li class="muted">This is the last day!</li>`}</ul>
+        </article>`;
+    }
+    html += `
+      <article class="card">
+        <p class="eyebrow">Daily reminder</p>
+        ${reminder
+          ? `<p>Reminder set for <strong>${fmtTime(reminder.time)}</strong> every day${reminder.enabled ? "" : " (turned off)"}. <button class="link" data-goto="alarms">Change in Alarms</button></p>`
+          : `<div class="row gap wrap"><input type="time" id="planReminderTime" value="06:30" style="max-width:140px" aria-label="Reminder time">
+             <button class="btn ghost" id="planReminderAdd">Remind me daily</button></div>`}
+      </article>
+      <details class="card" ${showAllDays ? "open" : ""} id="planAllDays">
+        <summary>All ${plan.days.length} days</summary>
+        <ul class="day-list all">${plan.days.map((d, idx) => {
+          const n = idx + 1, done = dayComplete(plan, n);
+          return `<li class="${done ? "read" : ""}${n === s.focus ? " focus" : ""}">
+            <label class="check"><input type="checkbox" data-read-day="${n}" ${done ? "checked" : ""} aria-label="Mark day ${n} as read"><span></span></label>
+            <span class="day-num">Day ${n}</span>
+            <button type="button" class="reading-link" data-open="${n}:0">${escapeHtml(dayLabel(d))}</button></li>`;
+        }).join("")}</ul>
+      </details>
+      <div class="row gap wrap">
+        <button class="btn ghost danger small" id="planStop">Stop or change plan</button>
+      </div>`;
+    body.innerHTML = html;
+
+    const catchUp = $("#planCatchUp");
+    if (catchUp) catchUp.addEventListener("click", () => {
+      const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (s.focus - 1));
+      state.plan.start = dateKey(start); save();
+      toast(`Schedule moved: day ${s.focus} is today`);
+      render.plan();
+    });
+    const addRem = $("#planReminderAdd");
+    if (addRem) addRem.addEventListener("click", () => {
+      state.alarms.push({ id: "a-reading", label: "Daily Bible reading", time: $("#planReminderTime").value || "06:30", days: [0, 1, 2, 3, 4, 5, 6], kind: "study", enabled: true });
+      save(); toast("Daily reading reminder added");
+      if (permission === "prompt") requestNotif();
+      render.plan();
+    });
+    $("#planAllDays").addEventListener("toggle", e => { showAllDays = e.target.open; });
+    $("#planStop").addEventListener("click", () => {
+      if (!confirm(`Stop “${plan.title}”? Your progress in this plan will be cleared.`)) return;
+      state.plan = null; save(); render.plan();
+    });
+  };
+
+  // Shared handlers for plan buttons and checkboxes (Today card, plan page)
+  document.addEventListener("click", e => {
+    const start = e.target.closest("[data-start-plan]");
+    if (start) { startPlan(start.dataset.startPlan); return; }
+    const open = e.target.closest("[data-open]");
+    if (open && planDef()) { const [d, i] = open.dataset.open.split(":").map(Number); openReading(d, i); }
+  });
+  document.addEventListener("change", e => {
+    const plan = planDef(); if (!plan) return;
+    const r = e.target.closest("[data-read]"), rd = e.target.closest("[data-read-day]");
+    if (r) { const [d, i] = r.dataset.read.split(":").map(Number); setRead(d, i, r.checked); }
+    else if (rd) { const d = +rd.dataset.readDay; plan.days[d - 1].forEach((_, i) => setRead(d, i, rd.checked)); }
+    else return;
+    if (dayComplete(plan, r ? +r.dataset.read.split(":")[0] : +rd.dataset.readDay) && e.target.checked) toast("Day complete! 🎉");
+    if (!$("#view-today").hidden) render.today();
+    if (!$("#view-plan").hidden) render.plan();
+  });
+
+  // Bar under the Bible text while reading a plan passage: next chapter → mark as read → next reading
+  function renderPlanBar() {
+    const bar = $("#planBar"), plan = planDef();
+    bar.hidden = true;
+    if (!plan || planStats(plan).finished && !state.plan.current) return;
+    const { book, chapter } = state.last;
+    const b = BOOKS.findIndex(x => x.name === book);
+    const inSeg = ([sb, c1, c2]) => sb === b && chapter >= c1 && chapter <= c2;
+    // Prefer the reading opened from the plan; otherwise match the current unfinished day
+    let day = null, i = -1;
+    const cur = state.plan.current;
+    if (cur && plan.days[cur.day - 1]?.[cur.i] && inSeg(plan.days[cur.day - 1][cur.i])) { day = cur.day; i = cur.i; }
+    else {
+      const f = planStats(plan).focus;
+      if (f) { const k = plan.days[f - 1].findIndex(inSeg); if (k >= 0) { day = f; i = k; } }
+    }
+    if (day == null) return;
+    const seg = plan.days[day - 1][i], [, c1, c2] = seg;
+    const read = isRead(day, i);
+    const nextIdx = plan.days[day - 1].findIndex((_, k) => !isRead(day, k) && k !== i);
+    let actions;
+    if (!read && chapter < c2) {
+      actions = `<button class="btn" id="planNextChapter">Next chapter ›</button>`;
+    } else if (!read) {
+      actions = `<button class="btn" id="planMarkRead">Mark as read ✓</button>`;
+    } else if (nextIdx >= 0) {
+      actions = `<span class="muted small">✓ Read.</span> <button class="btn" data-open="${day}:${nextIdx}">Next: ${escapeHtml(segLabel(plan.days[day - 1][nextIdx]))} ›</button>`;
+    } else {
+      actions = `<span><strong>Day ${day} complete! 🎉</strong></span> <button class="btn ghost" data-goto="plan">Back to plan</button>`;
+    }
+    bar.innerHTML = `
+      <div>
+        <p class="eyebrow">${escapeHtml(plan.title)} · Day ${day}</p>
+        <p class="plan-bar-title">${escapeHtml(segLabel(seg))}${c1 !== c2 ? ` <span class="muted small">· chapter ${chapter - c1 + 1} of ${c2 - c1 + 1}</span>` : ""}</p>
+      </div>
+      <div class="row gap wrap">${actions}</div>`;
+    bar.hidden = false;
+    const next = $("#planNextChapter");
+    if (next) next.addEventListener("click", () => goChapter(book, chapter + 1));
+    const mark = $("#planMarkRead");
+    if (mark) mark.addEventListener("click", () => {
+      setRead(day, i, true);
+      toast(dayComplete(plan, day) ? `Day ${day} complete! 🎉` : `${segLabel(seg)} marked as read`);
+      renderPlanBar();
+    });
+  }
 
   /* ================= STUDY ================= */
   let selectedLesson = null;

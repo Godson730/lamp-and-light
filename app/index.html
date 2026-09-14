@@ -35,6 +35,8 @@
         </div>
       </article>
 
+      <article class="card" id="todayPlan"></article>
+
       <article class="card" id="todayFast"></article>
 
       <article class="card">
@@ -92,6 +94,7 @@
       </div>
 
       <div class="reader" id="reader" aria-live="polite"></div>
+      <div class="card plan-bar" id="planBar" hidden></div>
       <p class="muted small center">Tap a verse to highlight, bookmark or read its commentary.</p>
 
       <details class="card" id="commentaryBox">
@@ -109,6 +112,13 @@
         <summary>Bookmarks &amp; highlights <span class="count" id="bookmarkCount">0</span></summary>
         <ul class="list" id="bookmarkList"></ul>
       </details>
+    </section>
+
+    <!-- READING PLAN -->
+    <section class="view" id="view-plan" data-view="plan" hidden>
+      <button class="link small back-link" data-goto="today">‹ Today</button>
+      <p class="eyebrow">Daily Bible reading</p>
+      <div id="planBody"></div>
     </section>
 
     <!-- STUDY -->
@@ -353,7 +363,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">1.1.0</span></p>
+      <p class="muted small">Version <span id="appVersion">1.2.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>
@@ -365,6 +375,7 @@
 
   <script src="capacitor.js"></script>
   <script src="data.js"></script>
+  <script src="plans.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
