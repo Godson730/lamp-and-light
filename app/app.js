@@ -15,6 +15,8 @@
   const LN = NATIVE ? Cap.registerPlugin("LocalNotifications") : null;
   const AppPlugin = NATIVE ? Cap.registerPlugin("App") : null;
   const SystemBars = NATIVE ? Cap.registerPlugin("SystemBars") : null;
+  const TTS = NATIVE ? Cap.registerPlugin("TextToSpeech") : null;   // Android: phone's speech engine
+  const webSpeech = !NATIVE && "speechSynthesis" in window ? window.speechSynthesis : null;
 
   /* ================= state ================= */
   const defaults = () => ({
@@ -31,6 +33,7 @@
     fastWeeks: {},           // weekKey -> {points:[bool], journal, done}
     fastHistory: [],         // [{week, date, title, type}]
     plan: null,              // active reading plan, see READING PLAN section
+    audio: { rate: 1, voice: "", continue: true },   // read-aloud settings
     alarms: [
       { id: "a-morning", label: "Morning devotion", time: "06:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "study", enabled: true },
       { id: "a-evening", label: "Evening prayer", time: "21:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "prayer", enabled: true }
@@ -294,6 +297,7 @@
         if (first && pendingCommentary == null) setTimeout(() => first.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
       }
       renderPlanBar();
+      if (player.active) setSpeakingVerse(player.idx); else updatePlayer();
       if (pendingCommentary != null) {
         const verse = pendingCommentary; pendingCommentary = null;
         $("#commentaryBox").open = true;
@@ -376,6 +380,11 @@
       else { state.bookmarks.unshift({ ref, text, at: Date.now() }); toast("Bookmarked"); }
     } else if (action === "copy") { copyText(`“${text}” — ${ref} (${state.translation.toUpperCase()})`); return; }
     else if (action === "commentary") { showVerseNote(state.last.book, state.last.chapter, +ref.split(":")[1]); return; }
+    else if (action === "listen") {
+      const n = +ref.split(":")[1];
+      startListening(state.last.book, state.last.chapter, Math.max(0, currentVerses.findIndex(v => v.n === n)));
+      return;
+    }
     save();
     const el = $(`#reader [data-verse="${ref.split(":")[1]}"]`);
     if (el) {
@@ -532,6 +541,211 @@
     const [bc, v] = ref.split(":");
     if (bc === `${state.last.book} ${state.last.chapter}`) { const el = $(`#reader [data-verse="${v}"]`); if (el) el.className = "verse"; }
   });
+
+  /* ================= AUDIO BIBLE (read aloud) ================= */
+  // Uses the phone's text-to-speech engine (Android) or the browser's speech synthesis. Verses are spoken one at a
+  // time so the current verse can be highlighted; "pause" stops the engine and resumes from the same verse.
+  const audioSupported = !!(TTS || webSpeech);
+  const RATES = [0.75, 1, 1.25, 1.5];
+  const player = { active: false, playing: false, book: null, chapter: 0, verses: [], idx: 0, token: 0 };
+  let ttsLang = "en-US", voiceList = [];
+
+  const speakable = t => t.replace(/\bLORD\b/g, "Lord").replace(/\bGOD\b/g, "God").replace(/\bJEHOVAH\b/g, "Jehovah");
+  const chapterIntro = (book, ch) => book === "Psalms" ? `Psalm ${ch}.` : `${book}, chapter ${ch}.`;
+
+  async function loadVoices() {
+    try {
+      if (TTS) {
+        voiceList = (await TTS.getSupportedVoices()).voices.map((v, i) => ({ ...v, index: i }));
+        const langs = (await TTS.getSupportedLanguages()).languages;
+        ttsLang = langs.find(l => l === "en-US") || langs.find(l => /^en[-_]/i.test(l)) || "en-US";
+      } else if (webSpeech) {
+        voiceList = webSpeech.getVoices().map((v, i) => ({ name: v.name, lang: v.lang, voiceURI: v.voiceURI, index: i, localService: v.localService }));
+      }
+    } catch (e) { voiceList = []; }
+    return voiceList;
+  }
+  if (webSpeech) webSpeech.addEventListener?.("voiceschanged", () => loadVoices());
+
+  async function engineStop() {
+    try {
+      if (TTS) await TTS.stop();
+      else if (webSpeech) webSpeech.cancel();
+    } catch (e) { /* nothing to stop */ }
+  }
+
+  async function startListening(book, chapter, fromIdx = 0) {
+    if (!audioSupported) { toast("Read-aloud isn't available on this device"); return; }
+    try {
+      const data = await fetchPassage(`${book} ${chapter}`);
+      player.book = book; player.chapter = chapter;
+      player.verses = data.verses.map(v => ({ n: v.verse, text: v.text }));
+    } catch (e) { toast("Couldn't open that chapter"); return; }
+    player.active = true;
+    playFrom(Math.max(0, Math.min(fromIdx, player.verses.length - 1)), fromIdx === 0);
+  }
+
+  async function playFrom(idx, withIntro = false) {
+    const token = ++player.token;
+    await engineStop();
+    if (token !== player.token) return;
+    player.playing = true; player.idx = idx;
+    const items = [];
+    if (withIntro) items.push({ text: chapterIntro(player.book, player.chapter), idx });
+    for (let i = idx; i < player.verses.length; i++) items.push({ text: speakable(player.verses[i].text), idx: i });
+    setSpeakingVerse(idx);
+    const rate = state.audio.rate || 1;
+    if (TTS) {
+      if (!voiceList.length) await loadVoices();
+      const voice = voiceList.find(v => v.voiceURI === state.audio.voice);
+      // Queue every verse at once; each promise resolves when that verse has been spoken
+      items.forEach((it, k) => {
+        TTS.speak({ text: it.text, lang: voice?.lang || ttsLang, rate, voice: voice ? voice.index : undefined, queueStrategy: 1 })
+          .then(() => {
+            if (token !== player.token) return;
+            if (k + 1 < items.length) setSpeakingVerse(items[k + 1].idx);
+            else chapterFinished(token);
+          })
+          .catch(err => {
+            if (token !== player.token) return;
+            console.warn("Speech failed", err);
+            player.playing = false; updatePlayer();
+            toast("The phone's voice couldn't read this. Check Settings › Text-to-speech on your phone.");
+          });
+      });
+    } else {
+      const voices = webSpeech.getVoices();
+      const voice = voices.find(v => v.voiceURI === state.audio.voice);
+      // Browsers with no working voice "finish" each verse instantly; detect that instead of racing through the Bible
+      let instantEnds = 0;
+      const speakItem = k => {
+        if (token !== player.token) return;
+        if (k >= items.length) { chapterFinished(token); return; }
+        const u = new SpeechSynthesisUtterance(items[k].text);
+        u.rate = rate; u.lang = voice?.lang || "en-US"; if (voice) u.voice = voice;
+        let startedAt = Date.now();
+        u.onstart = () => { startedAt = Date.now(); if (token === player.token) setSpeakingVerse(items[k].idx); };
+        u.onend = () => {
+          if (token !== player.token) return;
+          const tooFast = items[k].text.length > 25 && Date.now() - startedAt < 120;
+          instantEnds = tooFast ? instantEnds + 1 : 0;
+          if (instantEnds >= 3) {
+            stopListening(false);
+            toast("No reading voice is available in this browser. Try another browser, or install a voice in your device settings.");
+            return;
+          }
+          speakItem(k + 1);
+        };
+        u.onerror = e => { if (token === player.token && e.error !== "interrupted" && e.error !== "canceled") speakItem(k + 1); };
+        webSpeech.speak(u);
+      };
+      setTimeout(() => speakItem(0), 60);   // Chrome needs a moment after cancel()
+    }
+    updatePlayer();
+  }
+
+  async function chapterFinished(token) {
+    if (token !== player.token) return;
+    const { book, chapter } = player;
+    const b = BOOKS.findIndex(x => x.name === book);
+    // Inside a reading-plan passage, stop at the end of the passage so it can be marked as read
+    const plan = planDef();
+    let planEnd = false;
+    if (plan) {
+      const f = planStats(plan).focus;
+      const seg = f && plan.days[f - 1].find(([sb, c1, c2]) => sb === b && chapter >= c1 && chapter <= c2);
+      if (seg && chapter === seg[2]) planEnd = true;
+    }
+    let next = null;
+    if (chapter < BOOKS[b].chapters) next = [book, chapter + 1];
+    else if (b + 1 < BOOKS.length) next = [BOOKS[b + 1].name, 1];
+    if (!state.audio.continue || planEnd || !next) {
+      stopListening(false);
+      toast(planEnd ? "Today's reading is finished. Tap “Mark as read ✓”." : `Finished ${book} ${chapter}`);
+      return;
+    }
+    // Follow along: move the reader to the next chapter too
+    const following = state.last.book === book && state.last.chapter === chapter;
+    if (following) {
+      state.last = { book: next[0], chapter: next[1] }; save();
+      if (!$("#view-bible").hidden) goChapter(next[0], next[1]);
+    }
+    await startListening(next[0], next[1], 0);
+  }
+
+  function stopListening(hide = true) {
+    player.token++;
+    engineStop();
+    player.playing = false;
+    if (hide) player.active = false;
+    setSpeakingVerse(null);
+    updatePlayer();
+  }
+  function pauseListening() {
+    player.token++;
+    engineStop();
+    player.playing = false;
+    updatePlayer();
+  }
+
+  function setSpeakingVerse(idx) {
+    if (idx != null) player.idx = idx;
+    $$("#reader .verse.speaking").forEach(el => el.classList.remove("speaking"));
+    if (idx != null && player.active && state.last.book === player.book && state.last.chapter === player.chapter) {
+      const n = player.verses[idx]?.n;
+      const el = n && $(`#reader [data-verse="${n}"]`);
+      if (el) {
+        el.classList.add("speaking");
+        // Keep the spoken verse on screen, but don't fight the reader if it's already visible
+        const r = el.getBoundingClientRect();
+        if (!$("#view-bible").hidden && (r.top < 90 || r.bottom > innerHeight - 150)) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+    updatePlayer();
+  }
+
+  function updatePlayer() {
+    const bar = $("#player");
+    bar.hidden = !player.active;
+    document.body.classList.toggle("has-player", player.active);
+    $("#listenChapter").textContent = player.active && player.playing && state.last.book === player.book && state.last.chapter === player.chapter
+      ? "⏸ Pause reading" : "🔊 Listen to this chapter";
+    if (!player.active) return;
+    $("#plTitle").textContent = `${player.book} ${player.chapter}`;
+    const v = player.verses[player.idx];
+    $("#plVerse").textContent = v ? `${player.playing ? "Reading" : "Paused at"} verse ${v.n}` : "";
+    $("#plPlay").textContent = player.playing ? "⏸" : "▶";
+    $("#plPlay").setAttribute("aria-label", player.playing ? "Pause" : "Play");
+    $("#plRate").textContent = `${state.audio.rate || 1}×`;
+  }
+
+  $("#plPlay").addEventListener("click", () => player.playing ? pauseListening() : playFrom(player.idx));
+  $("#plPrev").addEventListener("click", () => playFrom(Math.max(0, player.idx - 1)));
+  $("#plNext").addEventListener("click", () => {
+    if (player.idx + 1 < player.verses.length) playFrom(player.idx + 1);
+    else chapterFinished(player.token);
+  });
+  $("#plClose").addEventListener("click", () => stopListening(true));
+  $("#plRate").addEventListener("click", () => {
+    const i = RATES.indexOf(state.audio.rate || 1);
+    state.audio.rate = RATES[(i + 1) % RATES.length]; save();
+    if (player.playing) playFrom(player.idx); else updatePlayer();
+    toast(`Reading speed ${state.audio.rate}×`);
+  });
+  $("#plInfo").addEventListener("click", () => {
+    pendingFocus = { from: player.verses[player.idx]?.n || 1, to: player.verses[player.idx]?.n || 1 };
+    state.last = { book: player.book, chapter: player.chapter }; save();
+    if ($("#view-bible").hidden) show("bible"); else goChapter(player.book, player.chapter);
+  });
+  $("#listenChapter").addEventListener("click", () => {
+    const { book, chapter } = state.last;
+    if (player.active && player.book === book && player.chapter === chapter) {
+      if (player.playing) pauseListening(); else playFrom(player.idx);
+    } else {
+      startListening(book, chapter, 0);
+    }
+  });
+  if (audioSupported) { $("#listenChapter").hidden = false; $("#verseListenBtn").hidden = false; }
 
   /* ================= READING PLAN ================= */
   // state.plan = { id, start: "YYYY-MM-DD", done: { "<day>": [bool per reading] }, current: { day, i } }
@@ -884,10 +1098,11 @@
     const read = isRead(day, i);
     const nextIdx = plan.days[day - 1].findIndex((_, k) => !isRead(day, k) && k !== i);
     let actions;
+    const listenBtn = audioSupported ? `<button class="btn ghost" id="planListen">🔊 Listen</button>` : "";
     if (!read && chapter < c2) {
-      actions = `<button class="btn" id="planNextChapter">Next chapter ›</button>`;
+      actions = `${listenBtn}<button class="btn" id="planNextChapter">Next chapter ›</button>`;
     } else if (!read) {
-      actions = `<button class="btn" id="planMarkRead">Mark as read ✓</button>`;
+      actions = `${listenBtn}<button class="btn" id="planMarkRead">Mark as read ✓</button>`;
     } else if (nextIdx >= 0) {
       actions = `<span class="muted small">✓ Read.</span> <button class="btn" data-open="${day}:${nextIdx}">Next: ${escapeHtml(segLabel(plan.days[day - 1][nextIdx]))} ›</button>`;
     } else {
@@ -900,6 +1115,8 @@
       </div>
       <div class="row gap wrap">${actions}</div>`;
     bar.hidden = false;
+    const listen = $("#planListen");
+    if (listen) listen.addEventListener("click", () => startListening(book, chapter, 0));
     const next = $("#planNextChapter");
     if (next) next.addEventListener("click", () => goChapter(book, chapter + 1));
     const mark = $("#planMarkRead");
@@ -1471,8 +1688,33 @@
     $("#setTheme").value = state.theme;
     $("#setFont").value = state.font;
     $("#setName").value = state.name;
+    if (audioSupported) {
+      $("#voiceSetting").hidden = false; $("#continueSetting").hidden = false;
+      $("#setAudioContinue").checked = state.audio.continue !== false;
+      loadVoices().then(list => {
+        const english = list.filter(v => /^en/i.test(v.lang || ""));
+        $("#setVoice").innerHTML = `<option value="">Phone default</option>` + english
+          .map(v => `<option value="${escapeHtml(v.voiceURI)}">${escapeHtml(v.name || v.voiceURI)} (${escapeHtml(v.lang)})${v.localService === false ? " · needs internet" : ""}</option>`).join("");
+        $("#setVoice").value = english.some(v => v.voiceURI === state.audio.voice) ? state.audio.voice : "";
+      });
+    }
     settings.returnValue = "";
     settings.showModal();
+  });
+  $("#setVoice").addEventListener("change", e => { state.audio.voice = e.target.value; save(); if (player.playing) playFrom(player.idx); });
+  $("#setAudioContinue").addEventListener("change", e => { state.audio.continue = e.target.checked; save(); });
+  $("#testVoice").addEventListener("click", async () => {
+    const token = ++player.token;   // interrupts any chapter being read
+    player.playing = false; updatePlayer();
+    await engineStop();
+    const text = "Thy word is a lamp unto my feet, and a light unto my path.";
+    const voice = voiceList.find(v => v.voiceURI === state.audio.voice);
+    if (TTS) TTS.speak({ text, lang: voice?.lang || ttsLang, rate: state.audio.rate || 1, voice: voice ? voice.index : undefined }).catch(() => toast("This voice isn't available"));
+    else if (webSpeech && token === player.token) {
+      const u = new SpeechSynthesisUtterance(text); u.rate = state.audio.rate || 1;
+      const wv = webSpeech.getVoices().find(v => v.voiceURI === state.audio.voice); if (wv) { u.voice = wv; u.lang = wv.lang; }
+      webSpeech.speak(u);
+    }
   });
   $("#shareApp").addEventListener("click", () =>
     copyText("Lamp & Light — a free Bible study, fasting & prayer app: https://godson730.github.io/lamp-and-light/"));
