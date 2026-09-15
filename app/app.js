@@ -50,10 +50,14 @@
   let alarmSignature = "";
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
-    if (NATIVE) {
-      const sig = JSON.stringify([state.alarms, state.snoozes]);
-      if (sig !== alarmSignature) { alarmSignature = sig; syncNativeAlarms(); }
-    }
+    checkNativeSync();
+  }
+  // Reschedule phone reminders whenever reminders, snoozes, reading progress or the date change
+  function checkNativeSync() {
+    if (!NATIVE) return;
+    const p = state.plan;
+    const sig = JSON.stringify([state.alarms, state.snoozes, p && [p.id, p.book, p.perDay, p.from, p.start, p.done], dateKey(new Date())]);
+    if (sig !== alarmSignature) { alarmSignature = sig; syncNativeAlarms(); }
   }
 
   /* ================= helpers ================= */
@@ -531,7 +535,32 @@
 
   /* ================= READING PLAN ================= */
   // state.plan = { id, start: "YYYY-MM-DD", done: { "<day>": [bool per reading] }, current: { day, i } }
-  const planDef = () => state.plan && PLANS.find(p => p.id === state.plan.id);
+  // A plan is either one of PLANS, or a book the user picked: { id: "book", book, perDay, from }
+  let bookPlanCache = null;
+  function planDef() {
+    if (!state.plan) return null;
+    if (state.plan.id !== "book") return PLANS.find(p => p.id === state.plan.id) || null;
+    const { book, perDay = 1, from = 1 } = state.plan;
+    const key = `${book}:${perDay}:${from}`;
+    if (bookPlanCache?.key === key) return bookPlanCache.plan;
+    const plan = buildBookPlan(book, perDay, from);
+    bookPlanCache = plan ? { key, plan } : null;
+    return plan;
+  }
+  function buildBookPlan(book, perDay, from) {
+    const b = BOOKS[book];
+    if (!b || from < 1 || from > b.chapters) return null;
+    const days = [];
+    for (let c = from; c <= b.chapters; c += perDay) days.push([[book, c, Math.min(c + perDay - 1, b.chapters)]]);
+    const words = CHAPTER_WORDS[book].slice(from - 1).reduce((sum, w) => sum + w, 0);
+    return {
+      id: "book",
+      title: `${b.name}, ${perDay === 1 ? "a chapter" : `${perDay} chapters`} a day`,
+      description: `Read ${b.name} from chapter ${from}.`,
+      minutes: Math.max(2, Math.round(words / days.length / 200)),
+      days
+    };
+  }
   const segLabel = ([b, c1, c2]) => `${BOOKS[b].name} ${c1 === c2 ? c1 : `${c1}–${c2}`}`;
   const dayLabel = readings => readings.map(segLabel).join(" · ");
   function parseDate(key) { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -569,6 +598,78 @@
     save();
     openRef(`${BOOKS[b].name} ${c1}`);
   }
+  function wireBookPlanForm() {
+    const bookSel = $("#bpBook"), perDaySel = $("#bpPerDay"), fromSel = $("#bpFrom");
+    const remind = $("#bpRemind"), time = $("#bpTime");
+    const fillFrom = () => {
+      const b = BOOKS[+bookSel.value];
+      const keep = Math.min(+fromSel.value || 1, b.chapters);
+      fromSel.innerHTML = Array.from({ length: b.chapters }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+      fromSel.value = keep;
+    };
+    const summary = () => {
+      const p = buildBookPlan(+bookSel.value, +perDaySel.value, +fromSel.value);
+      $("#bpSummary").textContent = `${p.days.length} ${p.days.length === 1 ? "day" : "days"} · about ${p.minutes} min a day · today: ${dayLabel(p.days[0])}` +
+        (remind.checked ? ` · reminder at ${fmtTime(time.value || "07:00")}` : "");
+    };
+    bookSel.addEventListener("change", () => { fromSel.value = 1; fillFrom(); summary(); });
+    [perDaySel, fromSel, remind, time].forEach(el => el.addEventListener("change", summary));
+    remind.addEventListener("change", () => { time.disabled = !remind.checked; });
+    fillFrom(); summary();
+    $("#bpStart").addEventListener("click", () => {
+      const book = +bookSel.value, perDay = +perDaySel.value, from = +fromSel.value;
+      state.plan = { id: "book", book, perDay, from, start: dateKey(new Date()), done: {}, current: null };
+      if (remind.checked) {
+        const existing = state.alarms.find(a => a.id === "a-reading");
+        const t = time.value || "07:00";
+        if (existing) Object.assign(existing, { time: t, enabled: true, days: [0, 1, 2, 3, 4, 5, 6] });
+        else state.alarms.push({ id: "a-reading", label: "Daily Bible reading", time: t, days: [0, 1, 2, 3, 4, 5, 6], kind: "study", enabled: true });
+      }
+      save();
+      toast(`Reading ${BOOKS[book].name}! Today: chapter ${from}${perDay > 1 ? `–${Math.min(from + perDay - 1, BOOKS[book].chapters)}` : ""}`);
+      if (remind.checked && permission === "prompt") requestNotif();
+      render.plan();
+    });
+  }
+
+  // Upcoming reading reminders that name the chapter for each day (used for the "a-reading" alarm)
+  function upcomingReadingReminders(alarm, horizonDays) {
+    const plan = planDef();
+    if (!plan) return null;
+    const s = planStats(plan);
+    if (s.finished) return null;
+    const now = new Date(), todayNum = planToday(), out = [];
+    let next = s.focus;
+    for (let k = 0; k < horizonDays && next <= plan.days.length; k++) {
+      const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + k);
+      if (!alarm.days.includes(date.getDay())) continue;
+      if (k === 0 && next > todayNum) continue;            // today's reading is already done
+      const when = at(date, alarm.time);
+      if (when <= now) { if (k === 0) next++; continue; }   // today's reminder already went off
+      out.push({ at: when, day: next, label: dayLabel(plan.days[next - 1]), total: plan.days.length, title: plan.title });
+      next++;
+    }
+    if (out.length && next <= plan.days.length) out[out.length - 1].last = true;   // reminders run out: nudge to reopen the app
+    return out;
+  }
+  // What the reading reminder should say right now (in-app alarm), or null if today's reading is done
+  function readingAlarmNow(alarm) {
+    const plan = planDef();
+    if (alarm.id !== "a-reading" || !plan) return alarm;
+    const s = planStats(plan);
+    if (s.finished) return alarm;
+    if (s.focus > planToday()) return null;
+    return { id: alarm.id, label: `📖 Today's reading: ${dayLabel(plan.days[s.focus - 1])}`, kind: "reading" };
+  }
+  function openNextReading() {
+    const plan = planDef();
+    if (!plan) { show("plan"); return; }
+    const s = planStats(plan);
+    if (s.finished) { show("plan"); return; }
+    const i = plan.days[s.focus - 1].findIndex((_, k) => !isRead(s.focus, k));
+    openReading(s.focus, Math.max(0, i));
+  }
+
   function startPlan(id) {
     state.plan = { id, start: dateKey(new Date()), done: {}, current: null };
     save();
@@ -588,9 +689,9 @@
     if (!plan) {
       card.innerHTML = `
         <p class="eyebrow">Daily Bible reading</p>
-        <h2>Read through the Bible</h2>
-        <p class="muted">Pick a plan and read a little each day, from Bible in a Year to Proverbs in a Month.</p>
-        <button class="btn" data-goto="plan">Choose a reading plan</button>`;
+        <h2>Read the Bible every day</h2>
+        <p class="muted">Choose any book to read a chapter a day, with a daily reminder of your chapter, or follow a plan like Bible in a Year.</p>
+        <button class="btn" data-goto="plan">Choose a book or plan</button>`;
       return;
     }
     const s = planStats(plan);
@@ -626,9 +727,36 @@
   render.plan = () => {
     const body = $("#planBody"), plan = planDef();
     if (!plan) {
+      const currentBook = Math.max(0, BOOKS.findIndex(b => b.name === state.last.book));
       body.innerHTML = `
-        <h1>Choose a reading plan</h1>
-        <p class="lead">Read a portion each day. Readings are balanced so every day takes about the same time.</p>
+        <h1>Choose what to read</h1>
+        <p class="lead">Pick any book of the Bible to read day by day, or follow one of the plans below.</p>
+        <article class="card plan-option book-plan">
+          <h2>Read a book of your choice</h2>
+          <p class="muted small">Read one book chapter by chapter. Your daily reminder tells you exactly which chapter is next.</p>
+          <div class="form-grid">
+            <label class="span-2">Book
+              <select id="bpBook">${BOOKS.map((b, i) =>
+                (i === 0 ? '<optgroup label="Old Testament">' : i === 39 ? '</optgroup><optgroup label="New Testament">' : "") +
+                `<option value="${i}" ${i === currentBook ? "selected" : ""}>${b.name} (${b.chapters} ${b.chapters === 1 ? "chapter" : "chapters"})</option>`).join("")}</optgroup>
+              </select>
+            </label>
+            <label>Chapters a day
+              <select id="bpPerDay">${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${n}</option>`).join("")}</select>
+            </label>
+            <label>Start at chapter
+              <select id="bpFrom"></select>
+            </label>
+          </div>
+          <label class="switch-row reminder-row">
+            <input type="checkbox" id="bpRemind" checked>
+            <span>Remind me every day at</span>
+            <input type="time" id="bpTime" value="${state.alarms.find(a => a.id === "a-reading")?.time || "07:00"}" aria-label="Reminder time">
+          </label>
+          <p class="notice small" id="bpSummary"></p>
+          <button class="btn" id="bpStart">Start reading</button>
+        </article>
+        <h2 class="section-title">Or follow a plan</h2>
         ${PLANS.map(p => `
           <article class="card plan-option">
             <div class="row between wrap">
@@ -641,6 +769,7 @@
             <p>${escapeHtml(p.description)}</p>
             <p class="muted small">Day 1: ${escapeHtml(dayLabel(p.days[0]))}</p>
           </article>`).join("")}`;
+      wireBookPlanForm();
       return;
     }
     const s = planStats(plan);
@@ -675,7 +804,8 @@
       <article class="card">
         <p class="eyebrow">Daily reminder</p>
         ${reminder
-          ? `<p>Reminder set for <strong>${fmtTime(reminder.time)}</strong> every day${reminder.enabled ? "" : " (turned off)"}. <button class="link" data-goto="alarms">Change in Alarms</button></p>`
+          ? `<p>Reminder set for <strong>${fmtTime(reminder.time)}</strong>${reminder.days.length === 7 ? " every day" : ""}${reminder.enabled ? "" : " (turned off)"}. It tells you which ${state.plan.id === "book" ? "chapter" : "passage"} to read that day.
+             <button class="link" data-goto="alarms">Change in Alarms</button></p>`
           : `<div class="row gap wrap"><input type="time" id="planReminderTime" value="06:30" style="max-width:140px" aria-label="Reminder time">
              <button class="btn ghost" id="planReminderAdd">Remind me daily</button></div>`}
       </article>
@@ -1048,7 +1178,8 @@
           <label class="toggle" title="On/off"><input type="checkbox" data-toggle="${a.id}" ${a.enabled ? "checked" : ""} aria-label="Enable ${escapeHtml(a.label)}"><span></span></label>
         </div>
         <div class="meta"><strong style="color:var(--ink)">${escapeHtml(a.label)}</strong>
-          <span class="tag">${a.system ? "Fasting plan" : kindLabel[a.kind]}</span><br>${daysText(a.days)}</div>
+          <span class="tag">${a.system ? "Fasting plan" : a.id === "a-reading" ? "Reading plan" : kindLabel[a.kind]}</span><br>${daysText(a.days)}${
+            a.id === "a-reading" && planDef() ? ` · says which ${state.plan.id === "book" ? "chapter" : "passage"} to read` : ""}</div>
       </li>`).join("")
       : `<li class="card muted">No reminders yet — add one below.</li>`;
   };
@@ -1156,6 +1287,17 @@
         const list = [];
         for (const a of state.alarms) {
           if (!a.enabled) continue;
+          // Reading reminder with an active plan: one notification per day for the next 60 days, each naming that day's reading
+          const readings = a.id === "a-reading" ? upcomingReadingReminders(a, 60) : null;
+          if (readings && readings.length) {
+            readings.forEach((r, k) => list.push({
+              id: 3000000 + k, title: `📖 Today's reading: ${r.label}`,
+              body: `${r.title} · Day ${r.day} of ${r.total}. Tap to start reading.${r.last ? " Open Lamp & Light to keep your reminders coming." : ""}`,
+              channelId: "alarms", smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
+              schedule: { at: r.at, allowWhileIdle: true }, extra: { kind: "reading", id: a.id }
+            }));
+            continue;
+          }
           const [hour, minute] = a.time.split(":").map(Number);
           const v = alarmVerse(a.kind);
           for (const d of a.days) {
@@ -1199,7 +1341,7 @@
     });
   }
 
-  const ALARM_VERSES = { prayer: ["Matthew 6:6", "1 Thessalonians 5:16-18", "Philippians 4:6-7"], study: ["Psalms 119:105", "2 Timothy 3:16-17", "Joshua 1:9"], fast: ["Isaiah 58:6", "Joel 2:12", "Matthew 6:33"] };
+  const ALARM_VERSES = { prayer: ["Matthew 6:6", "1 Thessalonians 5:16-18", "Philippians 4:6-7"], study: ["Psalms 119:105", "2 Timothy 3:16-17", "Joshua 1:9"], fast: ["Isaiah 58:6", "Joel 2:12", "Matthew 6:33"], reading: ["Psalms 119:105", "2 Timothy 3:16-17", "Matthew 11:28"] };
   function alarmVerse(kind) {
     const refs = ALARM_VERSES[kind] || ALARM_VERSES.prayer;
     const pick = refs[Math.floor(Math.random() * refs.length)];
@@ -1239,7 +1381,7 @@
   $("#ringStop").addEventListener("click", () => {
     const kind = ringing?.kind;
     stopRing();
-    if (kind === "fast") show("fast"); else if (kind === "study") show("study");
+    if (kind === "fast") show("fast"); else if (kind === "study") show("study"); else if (kind === "reading") openNextReading();
   });
   $("#ringSnooze").addEventListener("click", () => {
     if (ringing && ringing.id !== "test") {
@@ -1265,7 +1407,8 @@
       // fire within a 3-minute window (background tabs may tick slowly)
       if (nowMs >= t && nowMs - t < 3 * 60000 && state.fired[a.id] !== stamp) {
         state.fired[a.id] = stamp; changed = true;
-        ring(a);
+        const info = readingAlarmNow(a);   // reading reminder names today's chapter; skipped if already read
+        if (info) ring(info);
       }
     }
     const due = state.snoozes.filter(s => s.at <= nowMs);
@@ -1373,7 +1516,8 @@
     LN.addListener("localNotificationActionPerformed", e => {
       const kind = e.notification?.extra?.kind;
       stopRing();
-      show(kind === "fast" ? "fast" : kind === "study" ? "study" : "today");
+      if (kind === "reading") openNextReading();
+      else show(kind === "fast" ? "fast" : kind === "study" ? "study" : "today");
     });
     // An alarm going off while the app is open shows the alarm screen
     LN.addListener("localNotificationReceived", n => {
@@ -1390,6 +1534,7 @@
       const before = permission + exactAlarms;
       await refreshPermission();
       if (permission + exactAlarms !== before) syncNativeAlarms();   // e.g. user changed access in Settings
+      else checkNativeSync();                                         // new day: refresh the chapter-by-chapter reminders
       const v = location.hash.slice(1) || "today";
       if (v === "today" || v === "alarms" || v === "fast") render[v]();  // don't reset the Bible/Study scroll position
     });
