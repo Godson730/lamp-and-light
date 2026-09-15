@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read the Bible together — Lamp &amp; Light</title>
+<meta name="description" content="You've been invited to read the Bible together in the free Lamp & Light app.">
+<meta property="og:title" content="Read the Bible with me 📖">
+<meta property="og:description" content="Join my reading plan in the free Lamp & Light Bible app. We'll read the same passage every day.">
+<meta property="og:image" content="https://godson730.github.io/lamp-and-light/images/app-icon-512.png">
+<meta name="theme-color" content="#7a3b2e">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #f6f1e8; --surface: #fffdf9; --ink: #2a221c; --muted: #6f6257; --line: #e3d8c7; --accent: #7a3b2e; --gold: #a87a26; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15120f; --surface: #1f1a16; --ink: #efe6d8; --muted: #a99a8a; --line: #372f27; --accent: #dd8f73; --gold: #d9ab52; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 32px 16px 56px; }
+  main { max-width: 520px; margin: 0 auto; text-align: center; }
+  img.icon { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+  h1 { font-family: Georgia, "Noto Serif", serif; font-size: 1.9rem; line-height: 1.2; margin: 18px 0 8px; }
+  .eyebrow { font-size: .78rem; letter-spacing: .1em; text-transform: uppercase; color: var(--gold); font-weight: 700; margin: 0; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 20px; margin: 20px 0; text-align: left; }
+  .plan { font-family: Georgia, "Noto Serif", serif; font-size: 1.3rem; margin: 4px 0; }
+  .muted { color: var(--muted); }
+  .btn { display: block; width: 100%; padding: 15px 18px; border-radius: 14px; font-weight: 700; font-size: 1.05rem; text-decoration: none; text-align: center; margin: 10px 0; border: 2px solid var(--accent); }
+  .primary { background: var(--accent); color: #fffaf3; }
+  @media (prefers-color-scheme: dark) { .primary { color: #1b1411; } }
+  .outline { color: var(--accent); background: transparent; }
+  .code { font-family: ui-monospace, Consolas, monospace; font-size: 1.2rem; letter-spacing: .08em; font-weight: 700; }
+  ol { padding-left: 1.2em; margin: 8px 0 0; } li { margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <img class="icon" src="images/app-icon-512.png" alt="Lamp &amp; Light">
+  <p class="eyebrow" style="margin-top:18px">You're invited</p>
+  <h1>Let's read the Bible together</h1>
+  <p class="muted">Join your friend's reading plan and read the same passage each day.</p>
+
+  <div class="card">
+    <p class="eyebrow">Reading plan</p>
+    <p class="plan" id="planName">Loading…</p>
+    <p class="muted" id="planWhen"></p>
+    <p class="muted" style="margin:0">Invite code: <span class="code" id="code"></span></p>
+  </div>
+
+  <div id="actions">
+    <a class="btn primary" id="openApp" href="#">I have the app. Join now</a>
+    <a class="btn outline" href="https://github.com/Godson730/lamp-and-light/releases/latest/download/LampAndLight.apk">Get the Android app (free)</a>
+    <a class="btn outline" id="openBrowser" href="app/">Use it in my browser instead</a>
+  </div>
+
+  <div class="card">
+    <p class="eyebrow">Just installed the app?</p>
+    <ol>
+      <li>Open Lamp &amp; Light and tap <strong>Choose a book or plan</strong>.</li>
+      <li>Under <strong>Got an invite from a friend?</strong>, type the code above and tap <strong>Join</strong>.</li>
+    </ol>
+  </div>
+  <p class="muted" style="font-size:.9rem"><a href="./" style="color:inherit">About Lamp &amp; Light</a> · Free · No ads · No account</p>
+</main>
+<script src="app/data.js"></script>
+<script src="app/plans.js"></script>
+<script>
+  const PLAN_CODES = { BY: "bible-year", B2: "bible-2-years", NT: "nt-90", GO: "gospels-30", PS: "psalms-30", PR: "proverbs-31" };
+  const code = (new URLSearchParams(location.search).get("c") || "").trim().toUpperCase();
+  const m = code.match(/^(?:(BY|B2|NT|GO|PS|PR)|B(\d{1,2})X([1-5])C(\d{1,3}))-(\d{2})(\d{2})(\d{2})$/);
+  const $ = id => document.getElementById(id);
+  if (!m) {
+    $("planName").textContent = "This invite link looks incomplete";
+    $("planWhen").textContent = "Ask your friend to send the link again, or type their invite code in the app.";
+    $("openApp").style.display = "none";
+  } else {
+    $("code").textContent = code;
+    let name, days;
+    if (m[1]) { const p = PLANS.find(x => x.id === PLAN_CODES[m[1]]); name = p.title; days = p.days.length; }
+    else {
+      const book = BOOKS[+m[2] - 1], per = +m[3], from = +m[4];
+      name = book ? `${book.name}, ${per === 1 ? "a chapter" : per + " chapters"} a day` : "Bible reading";
+      days = book ? Math.ceil((book.chapters - from + 1) / per) : 0;
+    }
+    const start = new Date(2000 + +m[5], +m[6] - 1, +m[7]);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const day = Math.round((today - start) / 864e5) + 1;
+    $("planName").textContent = name;
+    $("planWhen").textContent = day < 1 ? `Starts ${start.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })} · ${days} days`
+      : day > days ? `Started ${start.toLocaleDateString([], { month: "long", day: "numeric" })} · ${days} days`
+      : `${day === 1 ? "Started today" : `Started ${start.toLocaleDateString([], { month: "long", day: "numeric" })}, now on day ${day}`} · ${days} days`;
+    // Android: open the app if installed (falls back to the download); other devices: use the browser version
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const fallback = encodeURIComponent(location.href.split("#")[0]);
+    $("openApp").href = isAndroid
+      ? `intent://join?c=${code}#Intent;scheme=lampandlight;package=com.lampandlight.biblestudy;S.browser_fallback_url=${fallback};end`
+      : `app/#join=${code}`;
+    if (!isAndroid) { $("openApp").textContent = "Join in my browser"; $("openBrowser").style.display = "none"; }
+    $("openBrowser").href = `app/#join=${code}`;
+  }
+</script>
+</body>
+</html>

@@ -405,3 +405,21 @@ const FAST_TIPS = [
   "Write down what you pray for so you can remember and give thanks when God answers.",
   "If you are pregnant, nursing, diabetic, on medication, or have any health condition, speak with your doctor first — choose a Daniel or media fast instead."
 ];
+
+/* Discussion questions shared with the daily reading, one per day in rotation. */
+const DISCUSSION_QUESTIONS = [
+  "What does today's reading teach you about who God is?",
+  "Which verse stood out to you most today, and why?",
+  "Is there a promise here to hold on to, or a command to obey?",
+  "What does this passage show about people, our struggles, failures or faith?",
+  "How does today's reading point us to Jesus?",
+  "What is one thing you will do differently today because of this reading?",
+  "What question does this passage raise for you?",
+  "How can today's reading shape the way you pray?",
+  "Who in this passage do you relate to most, and why?",
+  "What does this reading say about how we should treat others?",
+  "What in today's reading can you thank God for?",
+  "What warning or encouragement does this passage give?",
+  "How would you explain today's reading to a friend in one sentence?",
+  "What does this reading reveal about God's faithfulness and His plan?"
+];

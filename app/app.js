@@ -183,7 +183,7 @@
       openRef(r.dataset.ref);
     }
   });
-  window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+  window.addEventListener("hashchange", () => { if (!checkJoinHash()) show(location.hash.slice(1)); });
 
   const render = {};
 
@@ -241,7 +241,6 @@
 
     renderTodayPlan();
   };
-  $("#votdShare").addEventListener("click", () => copyText(`“${$("#votdText").textContent}” — ${$("#votdRef").textContent}`));
   function relWhen(d) {
     const today = dateKey(new Date()), tomorrow = dateKey(new Date(Date.now() + 864e5));
     const day = dateKey(d) === today ? "Today" : dateKey(d) === tomorrow ? "Tomorrow" : DAY_NAMES[d.getDay()];
@@ -378,7 +377,7 @@
       const i = state.bookmarks.findIndex(b => b.ref === ref);
       if (i >= 0) state.bookmarks.splice(i, 1);
       else { state.bookmarks.unshift({ ref, text, at: Date.now() }); toast("Bookmarked"); }
-    } else if (action === "copy") { copyText(`“${text}” — ${ref} (${state.translation.toUpperCase()})`); return; }
+    } else if (action === "share") { shareVerse(ref, text); return; }
     else if (action === "commentary") { showVerseNote(state.last.book, state.last.chapter, +ref.split(":")[1]); return; }
     else if (action === "listen") {
       const n = +ref.split(":")[1];
@@ -787,9 +786,10 @@
   function planStats(plan) {
     const today = Math.min(planToday(), plan.days.length);
     let completed = 0, firstUnread = null, behind = 0;
+    const joinDay = state.plan.joinDay || 1;   // joined a friend mid-plan: earlier days are skipped
     plan.days.forEach((_, idx) => {
       const day = idx + 1;
-      if (dayComplete(plan, day)) completed++;
+      if (day < joinDay || dayComplete(plan, day)) completed++;
       else {
         if (firstUnread == null) firstUnread = day;
         if (day < today) behind++;
@@ -929,6 +929,7 @@
       <div class="row between wrap">
         <span class="muted small">${s.completed} of ${plan.days.length} days done · about ${plan.minutes} min a day</span>
         <div class="row gap">
+          <button class="btn ghost small" data-share-reading>Share</button>
           <button class="btn ghost small" data-goto="plan">Plan</button>
           ${allRead
             ? (aheadDay ? `<button class="btn ghost small" data-open="${aheadDay}:0">Read ahead</button>` : "")
@@ -970,6 +971,14 @@
           <p class="notice small" id="bpSummary"></p>
           <button class="btn" id="bpStart">Start reading</button>
         </article>
+        <article class="card join-code">
+          <h2>Got an invite from a friend?</h2>
+          <p class="muted small">Enter the invite code they sent you to read the same passages together.</p>
+          <form class="search" id="joinCodeForm" autocomplete="off">
+            <input id="joinCodeInput" placeholder="e.g. BY-260915" aria-label="Invite code" autocapitalize="characters">
+            <button class="btn" type="submit">Join</button>
+          </form>
+        </article>
         <h2 class="section-title">Or follow a plan</h2>
         ${PLANS.map(p => `
           <article class="card plan-option">
@@ -984,6 +993,11 @@
             <p class="muted small">Day 1: ${escapeHtml(dayLabel(p.days[0]))}</p>
           </article>`).join("")}`;
       wireBookPlanForm();
+      $("#joinCodeForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const code = $("#joinCodeInput").value.trim();
+        if (code) handleJoinCode(code);
+      });
       return;
     }
     const s = planStats(plan);
@@ -1015,6 +1029,15 @@
         </article>`;
     }
     html += `
+      <article class="card read-together">
+        <p class="eyebrow">Read together</p>
+        <p>Invite family, friends or your church group. Everyone who joins reads the same passage on the same day.</p>
+        <p class="muted small">Invite code: <strong class="code">${planCode()}</strong></p>
+        <div class="row gap wrap">
+          <button class="btn" data-share-invite>Invite friends</button>
+          <button class="btn ghost" data-share-reading>Share today's reading</button>
+        </div>
+      </article>
       <article class="card">
         <p class="eyebrow">Daily reminder</p>
         ${reminder
@@ -1125,6 +1148,235 @@
       toast(dayComplete(plan, day) ? `Day ${day} complete! 🎉` : `${segLabel(seg)} marked as read`);
       renderPlanBar();
     });
+  }
+
+  /* ================= SHARING (WhatsApp, verse pictures, read together) ================= */
+  const Share = NATIVE ? Cap.registerPlugin("Share") : null;
+  const Filesystem = NATIVE ? Cap.registerPlugin("Filesystem") : null;
+  const SITE = "https://godson730.github.io/lamp-and-light/";
+
+  // Invite codes: plan + start date, e.g. "BY-260915" (Bible in a Year from 15 Sep 2026) or "B45X1C1-260915" (Romans, 1 a day, from ch. 1)
+  const PLAN_CODES = { "bible-year": "BY", "bible-2-years": "B2", "nt-90": "NT", "gospels-30": "GO", "psalms-30": "PS", "proverbs-31": "PR" };
+  function planCode(p = state.plan) {
+    const key = p.id === "book" ? `B${p.book + 1}X${p.perDay || 1}C${p.from || 1}` : PLAN_CODES[p.id];
+    return `${key}-${p.start.replace(/-/g, "").slice(2)}`;
+  }
+  function parsePlanCode(code) {
+    const m = String(code || "").trim().toUpperCase().match(/^(?:(BY|B2|NT|GO|PS|PR)|B(\d{1,2})X([1-5])C(\d{1,3}))-(\d{2})(\d{2})(\d{2})$/);
+    if (!m) return null;
+    const start = `20${m[5]}-${m[6]}-${m[7]}`;
+    const d = parseDate(start);
+    if (isNaN(d) || dateKey(d) !== start) return null;
+    if (m[1]) return { id: Object.keys(PLAN_CODES).find(k => PLAN_CODES[k] === m[1]), start };
+    const book = +m[2] - 1, perDay = +m[3], from = +m[4];
+    if (!BOOKS[book] || from < 1 || from > BOOKS[book].chapters) return null;
+    return { id: "book", book, perDay, from, start };
+  }
+  const inviteLink = () => `${SITE}join.html?c=${planCode()}`;
+
+  async function shareViaApps(text) {
+    if (Share) { try { await Share.share({ text, dialogTitle: "Share with…" }); } catch (e) { /* closed */ } return; }
+    if (navigator.share) {
+      try { await navigator.share({ text }); return; } catch (e) { if (e.name === "AbortError") return; }
+    }
+    copyText(text);
+  }
+  function openWhatsApp(text) {
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    if (NATIVE) location.href = url;          // Android hands this to the WhatsApp app
+    else window.open(url, "_blank", "noopener");
+  }
+
+  /* ----- text for each kind of share (WhatsApp understands *bold* and _italic_) ----- */
+  const trName = () => state.translation.toUpperCase();
+  const verseShareText = (ref, text) => `“${text}”\n— *${ref}* (${trName()})\n\nShared from Lamp & Light 📖\n${SITE}`;
+  function readingShareText() {
+    const plan = planDef(); if (!plan) return "";
+    const s = planStats(plan);
+    const day = s.finished ? plan.days.length : Math.min(Math.max(s.focus, 1), plan.days.length);
+    const q = DISCUSSION_QUESTIONS[(day - 1) % DISCUSSION_QUESTIONS.length];
+    return `📖 *${plan.title} · Day ${day}*\nToday's reading: *${dayLabel(plan.days[day - 1])}*\n\n💬 _${q}_\n\nRead along with us on Lamp & Light 👇\n${inviteLink()}`;
+  }
+  function inviteShareText() {
+    const plan = planDef(); if (!plan) return "";
+    return `Let's read the Bible together! 🙏\nI'm reading *${plan.title}* (${plan.days.length} days) in the Lamp & Light app. Join me and we'll read the same passage each day:\n${inviteLink()}\n\nInvite code: *${planCode()}*`;
+  }
+  function fastShareText() {
+    const f = fastInfo(), wk = f.week;
+    const day = f.day.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+    return `🕊 *Weekly Fasting & Prayer: ${wk.title}*\n${day} · ${fmtTime(state.fast.start)} – ${fmtTime(state.fast.end)}\n\n_${wk.focus}_\n\n*Scriptures:* ${wk.scriptures.join(" · ")}\n\n*Prayer points:*\n${wk.points.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\nPray with us on Lamp & Light 📖\n${SITE}`;
+  }
+  function lessonShareText() {
+    const i = selectedLesson ?? cycle(weekIndex(), LESSONS.length), l = LESSONS[i];
+    return `✏️ *Bible Study: ${l.title}*\nRead: *${l.passage}*\n\n${l.summary}\n\n*Questions to discuss:*\n${l.questions.map((q, k) => `${k + 1}. ${q}`).join("\n")}\n\n*This week:* ${l.apply}\n\nStudy with us on Lamp & Light 📖\n${SITE}`;
+  }
+
+  /* ----- verse picture ----- */
+  const CARD_STYLES = [
+    { id: "burgundy", name: "Burgundy", bg: ["#9a5140", "#5c2a20"], ink: "#fffaf3", accent: "#f3c46b" },
+    { id: "dawn", name: "Dawn", bg: ["#fbe3b8", "#e79b6d"], ink: "#3a1f14", accent: "#7a3b2e" },
+    { id: "parchment", name: "Parchment", bg: ["#fdf9f1", "#eee0c8"], ink: "#2a221c", accent: "#8b4a33" },
+    { id: "night", name: "Night", bg: ["#22304d", "#0d1321"], ink: "#f4f1e8", accent: "#d9ab52" }
+  ];
+  const iconImg = new Image(); iconImg.src = "icon.svg";
+  function wrapLines(ctx, text, maxWidth) {
+    const lines = []; let line = "";
+    for (const word of text.split(/\s+/)) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; } else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+  function drawVerseCard(canvas, ref, text, style) {
+    const ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+    const g = ctx.createLinearGradient(0, 0, W * 0.4, H);
+    g.addColorStop(0, style.bg[0]); g.addColorStop(1, style.bg[1]);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // soft glow + large opening quote mark
+    const glow = ctx.createRadialGradient(W * 0.25, H * 0.2, 10, W * 0.25, H * 0.2, W * 0.8);
+    glow.addColorStop(0, "rgba(255,255,255,0.18)"); glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = style.accent; ctx.globalAlpha = 0.28;
+    ctx.font = `700 360px Georgia, "Noto Serif", serif`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillText("“", 70, 380); ctx.globalAlpha = 1;
+    // verse text: largest size that fits
+    const maxW = W - 200, boxH = H - 520;
+    let size = 78, lines, lineH;
+    do {
+      ctx.font = `500 ${size}px Georgia, "Noto Serif", serif`;
+      lines = wrapLines(ctx, text, maxW); lineH = size * 1.36;
+      if (lines.length * lineH <= boxH) break;
+      size -= 3;
+    } while (size > 30);
+    const blockH = lines.length * lineH;
+    let y = 250 + (boxH - blockH) / 2 + size;
+    ctx.fillStyle = style.ink; ctx.textAlign = "center";
+    for (const l of lines) { ctx.fillText(l, W / 2, y); y += lineH; }
+    // reference
+    ctx.fillStyle = style.accent; ctx.font = `700 46px system-ui, "Segoe UI", Roboto, sans-serif`;
+    ctx.fillText(`${ref.toUpperCase()}  ·  ${trName()}`, W / 2, Math.min(y + 50, H - 190));
+    // footer brand
+    ctx.globalAlpha = 0.9; ctx.fillStyle = style.ink; ctx.font = `600 36px Georgia, "Noto Serif", serif`;
+    const label = "Lamp & Light", lw = ctx.measureText(label).width, iconS = 58, gap = 16;
+    const x0 = (W - (iconS + gap + lw)) / 2, fy = H - 90;
+    if (iconImg.complete && iconImg.naturalWidth) ctx.drawImage(iconImg, x0, fy - iconS + 12, iconS, iconS);
+    ctx.textAlign = "left"; ctx.fillText(label, x0 + iconS + gap, fy);
+    ctx.globalAlpha = 1;
+  }
+
+  /* ----- share sheet ----- */
+  const shareSheet = $("#shareSheet");
+  let shareState = null, lastShareFile = null;
+  $("#cardStyles").innerHTML = CARD_STYLES.map(s =>
+    `<button type="button" class="card-style" data-style="${s.id}" role="radio" aria-label="${s.name}" style="background:linear-gradient(135deg,${s.bg[0]},${s.bg[1]});color:${s.ink}">Aa</button>`).join("");
+  function openShare({ eyebrow, text, verse }) {
+    shareState = { text, verse };
+    $("#shareEyebrow").textContent = eyebrow;
+    $("#shareTextPreview").textContent = text;
+    $("#shareImageArea").hidden = !verse; $("#shareImageBtn").hidden = !verse;
+    $("#shareTextPreview").hidden = !!verse;
+    if (verse) renderShareCard();
+    if (!shareSheet.open) shareSheet.showModal();
+  }
+  function renderShareCard() {
+    const style = CARD_STYLES.find(s => s.id === state.cardStyle) || CARD_STYLES[0];
+    $$("#cardStyles .card-style").forEach(b => b.setAttribute("aria-checked", String(b.dataset.style === style.id)));
+    drawVerseCard($("#shareCanvas"), shareState.verse.ref, shareState.verse.text, style);
+  }
+  if (!iconImg.complete) iconImg.addEventListener("load", () => { if (shareSheet.open && shareState?.verse) renderShareCard(); });
+  $("#cardStyles").addEventListener("click", e => {
+    const b = e.target.closest("[data-style]"); if (!b) return;
+    state.cardStyle = b.dataset.style; save(); renderShareCard();
+  });
+  $("#shareWhatsApp").addEventListener("click", () => openWhatsApp(shareState.text));
+  $("#shareNative").addEventListener("click", () => shareViaApps(shareState.text));
+  $("#shareCopy").addEventListener("click", () => copyText(shareState.text));
+  $("#shareImageBtn").addEventListener("click", async () => {
+    const canvas = $("#shareCanvas");
+    try {
+      if (Share && Filesystem) {
+        if (lastShareFile) Filesystem.deleteFile({ path: lastShareFile, directory: "CACHE" }).catch(() => {});
+        lastShareFile = `verse-${Date.now()}.jpg`;
+        const file = await Filesystem.writeFile({ path: lastShareFile, data: canvas.toDataURL("image/jpeg", 0.92).split(",")[1], directory: "CACHE" });
+        await Share.share({ files: [file.uri], dialogTitle: "Share verse picture" });
+        return;
+      }
+      const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.92));
+      const file = new File([blob], "lamp-and-light-verse.jpg", { type: "image/jpeg" });
+      if (navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file] }); } catch (e) { /* closed */ }
+        return;
+      }
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: file.name });
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("Picture saved. Share it from your downloads");
+    } catch (e) {
+      toast("Couldn't share the picture");
+    }
+  });
+
+  function shareVerse(ref, text) { openShare({ eyebrow: `Share ${ref}`, text: verseShareText(ref, text), verse: { ref, text } }); }
+  $("#votdShare").addEventListener("click", () => {
+    const ref = $("#votdRef").dataset.ref;
+    shareVerse(ref, $("#votdText").textContent);
+  });
+  $("#shareFast").addEventListener("click", () => openShare({ eyebrow: "Share prayer points", text: fastShareText() }));
+  $("#shareLesson").addEventListener("click", () => openShare({ eyebrow: "Share this study", text: lessonShareText() }));
+  document.addEventListener("click", e => {
+    if (e.target.closest("[data-share-reading]")) openShare({ eyebrow: "Share today's reading", text: readingShareText() });
+    else if (e.target.closest("[data-share-invite]")) openShare({ eyebrow: "Invite friends to read with you", text: inviteShareText() });
+  });
+
+  /* ----- joining a friend's plan ----- */
+  let pendingJoin = null;
+  function handleJoinCode(code) {
+    const p = parsePlanCode(code);
+    if (!p) { toast("That invite code isn't valid"); return; }
+    const def = p.id === "book" ? buildBookPlan(p.book, p.perDay, p.from) : PLANS.find(x => x.id === p.id);
+    if (!def) { toast("That invite code isn't valid"); return; }
+    if (state.plan && planCode() === planCode({ ...p })) { toast("You're already reading this plan together"); show("today"); return; }
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const startDate = parseDate(p.start);
+    const groupDay = Math.round((today - startDate) / 864e5) + 1;
+    const dayNow = Math.min(Math.max(groupDay, 1), def.days.length);
+    pendingJoin = { p, def, groupDay, dayNow };
+    const startLabel = startDate.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+    $("#joinTitle").textContent = def.title;
+    $("#joinInfo").textContent = groupDay < 1
+      ? `Your friend's plan starts on ${startLabel}. You'll both read the same passage each day, starting with ${dayLabel(def.days[0])}.`
+      : groupDay === 1
+        ? `Your friend started today. You'll read the same passage each day, starting with ${dayLabel(def.days[0])}.`
+        : `Your friend started on ${startLabel} and is on day ${dayNow} of ${def.days.length}. Today's reading is ${dayLabel(def.days[dayNow - 1])}.`;
+    $("#joinInStep").textContent = groupDay > 1 ? `Join them on day ${dayNow}` : "Join and read together";
+    $("#joinFromStart").hidden = groupDay <= 1;
+    const current = planDef();
+    $("#joinReplace").hidden = !current;
+    $("#joinReplace").textContent = current ? `This replaces your current plan, “${current.title}”, and its progress.` : "";
+    const sheet = $("#joinSheet");
+    if (!sheet.open) sheet.showModal();
+  }
+  function finishJoin(inStep) {
+    if (!pendingJoin) return;
+    const { p, def, groupDay, dayNow } = pendingJoin;
+    const { start, ...rest } = p;
+    state.plan = inStep
+      ? { ...rest, start, done: {}, current: null, joinDay: groupDay > 1 ? dayNow : 1 }
+      : { ...rest, start: dateKey(new Date()), done: {}, current: null, joinDay: 1 };
+    save();
+    $("#joinSheet").close();
+    toast(inStep && groupDay > 1 ? `Joined! You're on day ${dayNow} with your friend.` : `Joined “${def.title}”!`);
+    pendingJoin = null;
+    show("today");
+  }
+  $("#joinInStep").addEventListener("click", () => finishJoin(true));
+  $("#joinFromStart").addEventListener("click", () => finishJoin(false));
+  function checkJoinHash() {
+    const m = location.hash.match(/^#join=([\w-]+)/i);
+    if (!m) return false;
+    history.replaceState(null, "", "#today");
+    setTimeout(() => handleJoinCode(m[1]), 250);
+    return true;
   }
 
   /* ================= STUDY ================= */
@@ -1737,7 +1989,8 @@
   if (!state.alarms.some(a => a.system) && state.fast.remind) syncFastAlarms();
   applySettings();
   save();
-  show(location.hash.slice(1) || "today");
+  if (!checkJoinHash()) show(location.hash.slice(1) || "today");
+  else show("today");
   checkAlarms();
   setInterval(() => { if (!$("#view-today").hidden) render.today(); }, 60000);
 
@@ -1766,6 +2019,14 @@
       ring({ id: n.extra?.id || "notification", label: n.title, kind: n.extra?.kind || "prayer" }, true);
     });
     // Android back button: close dialogs, then go to Today, then leave the app
+    // Invite links: lampandlight://join?c=CODE (from the website's "Open in the app" button)
+    const joinFromUrl = url => {
+      const m = String(url || "").match(/[?&]c=([\w-]+)/i);
+      if (m) handleJoinCode(m[1]);
+    };
+    AppPlugin.addListener("appUrlOpen", e => joinFromUrl(e.url));
+    AppPlugin.getLaunchUrl().then(r => r?.url && joinFromUrl(r.url)).catch(() => {});
+
     AppPlugin.addListener("backButton", () => {
       const open = $$("dialog[open]");
       if (open.length) { open.forEach(d => (d.id === "alarmRing" ? stopRing() : d.close("close"))); return; }

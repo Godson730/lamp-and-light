@@ -31,7 +31,7 @@
         <blockquote class="scripture" id="votdText"></blockquote>
         <div class="row between">
           <button class="link" id="votdRef"></button>
-          <button class="btn ghost small" id="votdShare">Copy</button>
+          <button class="btn ghost small" id="votdShare">Share</button>
         </div>
       </article>
 
@@ -146,6 +146,9 @@
       </article>
 
       <ol class="steps" id="lessonSteps"></ol>
+      <div class="row center" style="margin-bottom:14px">
+        <button type="button" class="btn ghost" id="shareLesson">Share this study with your group</button>
+      </div>
 
       <article class="card">
         <p class="eyebrow">Journal</p>
@@ -168,7 +171,10 @@
       </article>
 
       <article class="card">
-        <p class="eyebrow">Prayer points</p>
+        <div class="row between">
+          <p class="eyebrow">Prayer points</p>
+          <button type="button" class="btn ghost small" id="shareFast">Share with group</button>
+        </div>
         <ul class="checklist" id="fastPrayerPoints"></ul>
       </article>
 
@@ -305,8 +311,42 @@
         <button value="commentary" class="btn">Commentary</button>
         <button value="listen" class="btn ghost" id="verseListenBtn" hidden>🔊 Listen from here</button>
         <button value="bookmark" class="btn ghost" id="verseBookmarkBtn">Bookmark</button>
-        <button value="copy" class="btn ghost">Copy</button>
+        <button value="share" class="btn ghost">Share</button>
         <button value="close" class="btn ghost">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Share sheet: verse picture or text, to WhatsApp or any app -->
+  <dialog id="shareSheet" class="sheet">
+    <form method="dialog">
+      <p class="eyebrow" id="shareEyebrow">Share</p>
+      <div id="shareImageArea" hidden>
+        <canvas id="shareCanvas" width="1080" height="1350" aria-label="Verse picture preview"></canvas>
+        <div class="swatch-row" id="cardStyles" role="radiogroup" aria-label="Picture style"></div>
+      </div>
+      <pre class="share-text" id="shareTextPreview"></pre>
+      <div class="share-actions">
+        <button type="button" class="btn whatsapp" id="shareWhatsApp">WhatsApp</button>
+        <button type="button" class="btn" id="shareImageBtn" hidden>Share picture</button>
+        <button type="button" class="btn ghost" id="shareNative">More apps…</button>
+        <button type="button" class="btn ghost" id="shareCopy">Copy</button>
+        <button value="close" class="btn ghost">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Join a reading plan shared by a friend -->
+  <dialog id="joinSheet" class="sheet">
+    <form method="dialog">
+      <p class="eyebrow">Read together</p>
+      <h2 id="joinTitle"></h2>
+      <p id="joinInfo"></p>
+      <p class="notice small" id="joinReplace" hidden></p>
+      <div class="share-actions">
+        <button type="button" class="btn" id="joinInStep">Read in step with them</button>
+        <button type="button" class="btn ghost" id="joinFromStart" hidden>Start from day 1</button>
+        <button value="close" class="btn ghost">Not now</button>
       </div>
     </form>
   </dialog>
@@ -390,7 +430,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">1.3.0</span></p>
+      <p class="muted small">Version <span id="appVersion">1.4.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>
