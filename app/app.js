@@ -33,6 +33,7 @@
     fastWeeks: {},           // weekKey -> {points:[bool], journal, done}
     fastHistory: [],         // [{week, date, title, type}]
     plan: null,              // active reading plan, see READING PLAN section
+    tone: "chime",           // default alarm sound; each reminder may override it
     audio: { rate: 1, voice: "", continue: true },   // read-aloud settings
     alarms: [
       { id: "a-morning", label: "Morning devotion", time: "06:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "study", enabled: true },
@@ -83,6 +84,46 @@
   }
   const cycle = (i, n) => ((i % n) + n) % n;
   const weekKey = d => dateKey(startOfWeek(d));
+
+  /* ----- alarm tones ----- */
+  // Android needs one notification channel per sound, so each tone has its own channel id.
+  const TONES = [
+    { id: "chime", name: "Chime", file: "sounds/chime.wav" },
+    { id: "bells", name: "Church bells", file: "sounds/bells.wav" },
+    { id: "harp", name: "Harp", file: "sounds/harp.wav" },
+    { id: "morning", name: "Morning", file: "sounds/morning.wav" },
+    { id: "alert", name: "Alert", file: "sounds/alert.wav" },
+    { id: "default", name: "Phone's default sound", file: null },
+    { id: "silent", name: "Silent (vibration only)", file: null, silence: true }
+  ];
+  const toneById = id => TONES.find(t => t.id === id) || TONES[0];
+  const toneFor = a => toneById(a?.sound || state.tone || "chime").id;
+  const channelFor = tone => `alarm_${tone}_v1`;
+  const toneName = id => toneById(id).name;
+
+  let tonePlayer = null;
+  function playTone(id, { loop = false } = {}) {
+    stopTone();
+    const tone = toneById(id);
+    if (tone.id === "silent") return true;
+    if (!tone.file) return false;                 // "phone's default": no file to play in-app
+    try {
+      tonePlayer = new Audio(tone.file);
+      tonePlayer.loop = loop;
+      tonePlayer.volume = 1;
+      tonePlayer.play().catch(() => { tonePlayer = null; });
+      return true;
+    } catch (e) { tonePlayer = null; return false; }
+  }
+  function stopTone() {
+    if (!tonePlayer) return;
+    try { tonePlayer.pause(); tonePlayer.currentTime = 0; } catch (e) { /* ignore */ }
+    tonePlayer = null;
+  }
+  const toneOptions = (selected, includeDefault) =>
+    (includeDefault ? `<option value="">Default (${escapeHtml(toneName(state.tone || "chime"))})</option>` : "") +
+    TONES.map(t => `<option value="${t.id}" ${selected === t.id ? "selected" : ""}>${escapeHtml(t.name)}</option>`).join("");
+
 
   function toast(msg) {
     const t = $("#toast");
@@ -1682,7 +1723,7 @@
     const kindLabel = { prayer: "Prayer", study: "Study", fast: "Fasting" };
     const sorted = state.alarms.slice().sort((a, b) => toMin(a.time) - toMin(b.time));
     $("#alarmList").innerHTML = sorted.length ? sorted.map(a => `
-      <li class="alarm${a.enabled ? "" : " off"}">
+      <li class="alarm${a.enabled ? "" : " off"}" data-edit="${a.id}" tabindex="0" role="button" aria-label="Edit ${escapeHtml(a.label)}">
         <div>
           <div class="time">${fmtTime(a.time)}</div>
         </div>
@@ -1691,7 +1732,7 @@
           <label class="toggle" title="On/off"><input type="checkbox" data-toggle="${a.id}" ${a.enabled ? "checked" : ""} aria-label="Enable ${escapeHtml(a.label)}"><span></span></label>
         </div>
         <div class="meta"><strong style="color:var(--ink)">${escapeHtml(a.label)}</strong>
-          <span class="tag">${a.system ? "Fasting plan" : a.id === "a-reading" ? "Reading plan" : kindLabel[a.kind]}</span><br>${daysText(a.days)}${
+          <span class="tag">${a.system ? "Fasting plan" : a.id === "a-reading" ? "Reading plan" : kindLabel[a.kind]}</span><br>${daysText(a.days)} · 🔔 ${escapeHtml(toneName(toneFor(a)))}${
             a.id === "a-reading" && planDef() ? ` · says which ${state.plan.id === "book" ? "chapter" : "passage"} to read` : ""}</div>
       </li>`).join("")
       : `<li class="card muted">No reminders yet — add one below.</li>`;
@@ -1702,17 +1743,80 @@
     a.enabled = t.checked; save(); render.alarms();
   });
   $("#alarmList").addEventListener("click", e => {
+    const row = e.target.closest("[data-edit]");
+    if (row && !e.target.closest("[data-del], .toggle")) {
+      const a = state.alarms.find(x => x.id === row.dataset.edit);
+      if (a) { openAlarmEditor(a); return; }
+    }
     const d = e.target.closest("[data-del]"); if (!d) return;
     const a = state.alarms.find(x => x.id === d.dataset.del);
     if (confirm(`Delete “${a.label}”?`)) { state.alarms = state.alarms.filter(x => x !== a); save(); render.alarms(); }
   });
+  /* ----- choosing sounds ----- */
+  $("#alarmDays").insertAdjacentHTML("afterend", "");   // (kept for layout order)
+  function fillToneSelects() {
+    $("#setTone").innerHTML = toneOptions(state.tone || "chime", false);
+    $("#alarmSound").innerHTML = toneOptions("", true);
+  }
+  fillToneSelects();
+  $("#setTone").addEventListener("change", e => {
+    state.tone = e.target.value; save(); fillToneSelects();
+    playTone(state.tone) || toast(toneName(state.tone) === "Silent (vibration only)" ? "Reminders will only vibrate" : "Your phone's own notification sound will be used");
+    if (!$("#view-alarms").hidden) render.alarms();
+  });
+  $("#setTonePreview").addEventListener("click", () => { unlockAudio(); if (!playTone($("#setTone").value)) toast("That's your phone's own sound — it can't be played here"); });
+  $("#alarmSoundPreview").addEventListener("click", () => { unlockAudio(); playTone($("#alarmSound").value || state.tone || "chime"); });
+  $("#editSoundPreview").addEventListener("click", () => { unlockAudio(); playTone($("#editSound").value || state.tone || "chime"); });
+  $$("dialog").forEach(d => d.addEventListener("close", stopTone));
+
+  /* ----- editing a reminder ----- */
+  const alarmEdit = $("#alarmEditSheet");
+  $("#editDays").insertAdjacentHTML("beforeend", DAY_SHORT.map((d, i) =>
+    `<label class="day-btn" title="${DAY_NAMES[i]}"><input type="checkbox" value="${i}"><span>${d}</span></label>`).join(""));
+  let editingId = null;
+  function openAlarmEditor(a) {
+    editingId = a.id;
+    $("#editLabel").value = a.label;
+    $("#editLabel").disabled = !!a.system;          // fasting-plan reminders are named by the plan
+    $("#editTime").value = a.time;
+    $("#editTime").disabled = !!a.system;
+    $("#editKind").value = a.kind;
+    $("#editKind").disabled = !!a.system;
+    $("#editSound").innerHTML = toneOptions(a.sound || "", true);
+    $("#editSound").value = a.sound || "";
+    $$("#editDays input").forEach(i => { i.checked = a.days.includes(+i.value); i.disabled = !!a.system; });
+    $("#editDelete").hidden = !!a.system;
+    alarmEdit.showModal();
+  }
+  $("#alarmEditForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const a = state.alarms.find(x => x.id === editingId);
+    if (!a) { alarmEdit.close(); return; }
+    const sound = $("#editSound").value;
+    if (sound) a.sound = sound; else delete a.sound;
+    if (!a.system) {
+      const days = $$("#editDays input:checked").map(i => +i.value);
+      if (!days.length) { toast("Pick at least one day"); return; }
+      Object.assign(a, { label: $("#editLabel").value.trim() || "Reminder", time: $("#editTime").value, days, kind: $("#editKind").value });
+    }
+    save(); alarmEdit.close(); render.alarms(); toast("Reminder updated");
+  });
+  $("#editCancel").addEventListener("click", () => alarmEdit.close());
+  $("#editDelete").addEventListener("click", () => {
+    const a = state.alarms.find(x => x.id === editingId);
+    if (!a || !confirm(`Delete “${a.label}”?`)) return;
+    state.alarms = state.alarms.filter(x => x !== a);
+    save(); alarmEdit.close(); render.alarms(); toast("Reminder deleted");
+  });
+
   $("#alarmForm").addEventListener("submit", e => {
     e.preventDefault();
     const days = $$("#alarmDays input:checked").map(i => +i.value);
     if (!days.length) { toast("Pick at least one day"); return; }
     state.alarms.push({
       id: "a-" + Date.now().toString(36), label: $("#alarmLabel").value.trim() || "Reminder",
-      time: $("#alarmTime").value, days, kind: $("#alarmKind").value, enabled: true
+      time: $("#alarmTime").value, days, kind: $("#alarmKind").value, enabled: true,
+      ...($("#alarmSound").value ? { sound: $("#alarmSound").value } : {})
     });
     save();
     $("#alarmLabel").value = "";
@@ -1780,7 +1884,7 @@
     const v = alarmVerse("prayer");
     await LN.schedule({ notifications: [{
       id: 2999999, title: "Test alarm — time to pray", body: `${v.ref} — ${v.text}`, largeBody: `“${v.text}” — ${v.ref}`,
-      channelId: "alarms", smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
+      channelId: channelFor(state.tone || "chime"), smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
       schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }, extra: { kind: "prayer", id: "test" }
     }] });
     toast("Test alarm in 10 seconds — you can close the app");
@@ -1806,7 +1910,7 @@
             readings.forEach((r, k) => list.push({
               id: 3000000 + k, title: `📖 Today's reading: ${r.label}`,
               body: `${r.title} · Day ${r.day} of ${r.total}. Tap to start reading.${r.last ? " Open Lamp & Light to keep your reminders coming." : ""}`,
-              channelId: "alarms", smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
+              channelId: channelFor(toneFor(a)), smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
               schedule: { at: r.at, allowWhileIdle: true }, extra: { kind: "reading", id: a.id }
             }));
             continue;
@@ -1816,14 +1920,14 @@
           for (const d of a.days) {
             list.push({
               id: hashId(a.id) * 10 + d, title: a.label, body: `${v.ref} — ${v.text}`, largeBody: `“${v.text}” — ${v.ref}`,
-              channelId: "alarms", smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
+              channelId: channelFor(toneFor(a)), smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
               schedule: { on: { weekday: d + 1, hour, minute }, allowWhileIdle: true },
               extra: { kind: a.kind, id: a.id }
             });
           }
         }
         state.snoozes.filter(s => s.at > Date.now()).forEach((s, i) => list.push({
-          id: 2000000 + i, title: s.label, body: "Snoozed reminder", channelId: "alarms", smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
+          id: 2000000 + i, title: s.label, body: "Snoozed reminder", channelId: channelFor(s.sound || state.tone || "chime"), smallIcon: "ic_stat_notify", iconColor: "#7A3B2E", isExactNotification: exactAlarms === "granted",
           schedule: { at: new Date(s.at), allowWhileIdle: true }, extra: { kind: s.kind, id: s.id }
         }));
         if (list.length) await LN.schedule({ notifications: list });
@@ -1872,8 +1976,12 @@
     if (!dlg.open) dlg.showModal();
     if (silent) return;
 
-    unlockAudio(); chime();
-    clearInterval(chimeTimer); chimeTimer = setInterval(chime, 2600);
+    unlockAudio();
+    const tone = toneFor(a);
+    if (!playTone(tone, { loop: true })) {          // "phone's default" in the browser: use the built-in chime
+      chime();
+      clearInterval(chimeTimer); chimeTimer = setInterval(chime, 2600);
+    }
     clearTimeout(ringStopTimer); ringStopTimer = setTimeout(stopRing, 90000);
     if (navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 400]);
 
@@ -1887,6 +1995,7 @@
     }
   }
   function stopRing() {
+    stopTone();
     clearInterval(chimeTimer); clearTimeout(ringStopTimer);
     const dlg = $("#alarmRing"); if (dlg.open) dlg.close();
     ringing = null;
@@ -1898,7 +2007,7 @@
   });
   $("#ringSnooze").addEventListener("click", () => {
     if (ringing && ringing.id !== "test") {
-      state.snoozes.push({ id: ringing.id, label: ringing.label, kind: ringing.kind, at: Date.now() + 5 * 60000 });
+      state.snoozes.push({ id: ringing.id, label: ringing.label, kind: ringing.kind, sound: ringing.sound, at: Date.now() + 5 * 60000 });
       save(); toast("Snoozed for 5 minutes");
     }
     stopRing();
@@ -2041,10 +2150,16 @@
   if (NATIVE) {
     (async () => {
       try {
-        await LN.createChannel({
-          id: "alarms", name: "Prayer, study & fasting alarms",
-          description: "Your Lamp & Light reminders", importance: 4, visibility: 1, vibration: true, lights: true, lightColor: "#A87A26"
-        });
+        for (const tone of TONES) {
+          await LN.createChannel({
+            id: channelFor(tone.id),
+            name: `Reminders · ${tone.name}`,
+            description: "Your Lamp & Light prayer, reading, study and fasting reminders",
+            importance: 4, visibility: 1, vibration: true, lights: true, lightColor: "#A87A26",
+            ...(tone.file ? { sound: tone.file.replace("sounds/", "") } : {}),
+            ...(tone.silence ? { sound: "silence" } : {})
+          });
+        }
       } catch (e) { /* channels need Android 8+ */ }
       await refreshPermission();
       if (permission === "prompt") await requestNotif(); else syncNativeAlarms();

@@ -270,6 +270,12 @@
               <option value="fast">Fasting</option>
             </select>
           </label>
+          <label class="span-2">Sound
+            <span class="row gap">
+              <select id="alarmSound"></select>
+              <button type="button" class="btn ghost small" id="alarmSoundPreview" aria-label="Play this sound">▶</button>
+            </span>
+          </label>
           <fieldset class="span-2 days" id="alarmDays">
             <legend>Repeat on</legend>
           </fieldset>
@@ -371,6 +377,42 @@
     </form>
   </dialog>
 
+  <!-- Edit a reminder -->
+  <dialog id="alarmEditSheet" class="sheet">
+    <div class="dialog-body">
+      <p class="eyebrow">Edit reminder</p>
+      <form id="alarmEditForm" class="form-grid">
+        <label class="span-2">Label
+          <input id="editLabel" required maxlength="60">
+        </label>
+        <label>Time
+          <input type="time" id="editTime" required>
+        </label>
+        <label>Type
+          <select id="editKind">
+            <option value="prayer">Prayer</option>
+            <option value="study">Bible study</option>
+            <option value="fast">Fasting</option>
+          </select>
+        </label>
+        <label class="span-2">Sound
+          <span class="row gap">
+            <select id="editSound"></select>
+            <button type="button" class="btn ghost small" id="editSoundPreview" aria-label="Play this sound">▶</button>
+          </span>
+        </label>
+        <fieldset class="span-2 days" id="editDays">
+          <legend>Repeat on</legend>
+        </fieldset>
+        <div class="span-2 share-actions">
+          <button class="btn" type="submit">Save changes</button>
+          <button type="button" class="btn ghost" id="editCancel">Cancel</button>
+          <button type="button" class="btn ghost danger" id="editDelete">Delete</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <!-- Community guidelines for groups -->
   <dialog id="guidelinesSheet" class="sheet">
     <form method="dialog">
@@ -428,6 +470,12 @@
         <label>Text size
           <input type="range" id="setFont" min="15" max="26" step="1">
         </label>
+        <label class="span-2">Reminder sound
+          <span class="row gap">
+            <select id="setTone"></select>
+            <button type="button" class="btn ghost small" id="setTonePreview" aria-label="Play this sound">▶</button>
+          </span>
+        </label>
         <label class="span-2" id="voiceSetting" hidden>Read-aloud voice
           <span class="row gap">
             <select id="setVoice"><option value="">Phone default</option></select>
@@ -459,7 +507,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">2.0.0</span></p>
+      <p class="muted small">Version <span id="appVersion">2.1.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>
