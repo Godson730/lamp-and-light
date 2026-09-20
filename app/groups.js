@@ -413,7 +413,7 @@ function renderChat(pane) {
       ${visibleMsgs.length ? visibleMsgs.map(m => `
         <div class="msg ${m.uid === me ? "mine" : ""} kind-${esc(m.kind)}" data-msg="${m.id}" tabindex="0">
           ${m.uid === me ? "" : `<span class="msg-name">${esc(m.name)}</span>`}
-          ${m.kind === "photo" ? photoMarkup(m) : ""}
+          ${m.kind === "photo" || m.kind === "video" ? photoMarkup(m) : ""}
           ${m.text ? `<span class="msg-text">${esc(m.text)}</span>` : ""}
           <span class="msg-time">${when(m.createdAt)}</span>
         </div>`).join("") : `<p class="muted center chat-empty">No messages yet. Say hello and share what God is teaching you! 👋</p>`}
@@ -424,8 +424,8 @@ function renderChat(pane) {
       <button type="button" class="chip" id="postVerse">✝ Share verse of the day</button>
     </div>
     <form class="composer" id="chatForm">
-      <input type="file" id="photoPicker" accept="image/*" hidden>
-      <button type="button" class="pl-btn attach" id="attachPhoto" aria-label="Send a photo" title="Send a photo">📷</button>
+      <input type="file" id="photoPicker" accept="image/*,video/*" hidden>
+      <button type="button" class="pl-btn attach" id="attachPhoto" aria-label="Send a photo or video" title="Send a photo or video">📷</button>
       <textarea id="chatInput" rows="1" maxlength="2000" placeholder="Write a message…" aria-label="Message ${esc(S.group.name)}"></textarea>
       <button class="btn" type="submit" aria-label="Send">Send</button>
     </form>`;
@@ -447,7 +447,8 @@ function renderChat(pane) {
   $("#postVerse").addEventListener("click", () => { const v = LL.votd(); postMessage({ text: `“${v.text}”\n— ${v.ref}`, kind: "verse", ref: v.ref }); });
   $$("[data-msg]", pane).forEach(b => b.addEventListener("click", e => {
     const m = S.messages.find(x => x.id === b.dataset.msg);
-    if (e.target.closest(".msg-photo") && m?.kind === "photo") viewPhoto(m);   // tap the picture to enlarge
+    if (e.target.closest(".msg-photo") && m?.kind === "video") viewVideo(m);   // tap to play
+    else if (e.target.closest(".msg-photo") && m?.kind === "photo") viewPhoto(m);   // tap the picture to enlarge
     else messageMenu(m);
   }));
   $("#attachPhoto").addEventListener("click", () => $("#photoPicker").click());
@@ -455,8 +456,8 @@ function renderChat(pane) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (/^video\//.test(file.type)) { LL.toast("Videos can't be sent yet — send a photo, or paste a video link"); return; }
-    if (!/^image\//.test(file.type)) { LL.toast("Please choose a photo"); return; }
+    if (/^video\//.test(file.type)) { handleVideoPick(file); return; }
+    if (!/^image\//.test(file.type)) { LL.toast("Please choose a photo or a video"); return; }
     try {
       const shot = await shrinkPhoto(file);
       confirmPhoto(shot);
@@ -491,6 +492,169 @@ async function shrinkPhoto(file) {
   return { dataUrl, w, h, kb: Math.round(dataUrl.length * 0.75 / 1024) };
 }
 
+/* ----- short video clips (kept small enough for the free plan) ----- */
+const MAX_VIDEO_SECONDS = 10;
+const MAX_CLIP_CHARS = 690000;
+const videoCache = new Map();
+const recorderType = () =>
+  ["video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    .find(t => window.MediaRecorder?.isTypeSupported?.(t)) || "";
+
+// Plays the chosen video silently into a canvas and re-records it at ~480p and a low bitrate.
+// Takes about as long as the clip itself, so the caller shows progress.
+async function shrinkVideo(file, onProgress) {
+  const type = recorderType();
+  if (!type) throw new Error("no-recorder");
+  const url = URL.createObjectURL(file);
+  const video = Object.assign(document.createElement("video"), { src: url, muted: false, playsInline: true, preload: "auto" });
+  video.setAttribute("playsinline", "");
+  try {
+    await new Promise((res, rej) => {
+      video.onloadedmetadata = res;
+      video.onerror = () => rej(new Error("unreadable"));
+      setTimeout(() => rej(new Error("unreadable")), 15000);
+    });
+    // some videos (especially ones made by a phone's recorder) don't report their length
+    const known = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : MAX_VIDEO_SECONDS;
+    const dur = Math.min(known, MAX_VIDEO_SECONDS);
+    const w0 = video.videoWidth || 640, h0 = video.videoHeight || 480;
+    const scale = Math.min(1, 640 / Math.max(w0, h0));
+    const w = Math.round(w0 * scale / 2) * 2, h = Math.round(h0 * scale / 2) * 2;
+    // aim for a file that fits, with a little headroom
+    const targetBytes = MAX_CLIP_CHARS * 0.72 * 0.86;
+    const totalBits = Math.max(180000, Math.min(1200000, (targetBytes * 8) / dur));
+    const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+    const ctx = canvas.getContext("2d");
+    const stream = canvas.captureStream(24);
+
+    // keep the sound, but play it silently: route audio through Web Audio instead of the speakers
+    let audioCtx = null;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = audioCtx.createMediaStreamDestination();
+      audioCtx.createMediaElementSource(video).connect(dest);
+      dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+    } catch (e) { video.muted = true; }
+
+    const chunks = [];
+    const recorder = new MediaRecorder(stream, {
+      mimeType: type,
+      videoBitsPerSecond: Math.round(totalBits * 0.88),
+      audioBitsPerSecond: Math.min(64000, Math.round(totalBits * 0.12))
+    });
+    recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+    const done = new Promise(res => { recorder.onstop = res; });
+
+    let poster = null;
+    const draw = () => {
+      if (video.paused || video.ended) return;
+      ctx.drawImage(video, 0, 0, w, h);
+      if (!poster && video.currentTime > 0.1) poster = canvas.toDataURL("image/jpeg", 0.6);
+      onProgress?.(Math.min(0.98, video.currentTime / dur));
+      requestAnimationFrame(draw);
+    };
+    recorder.start(250);
+    const startedAt = Date.now();
+    await video.play();
+    draw();
+    await new Promise(res => {
+      const stop = () => { try { video.pause(); } catch (e) { /* ignore */ } res(); };
+      video.onended = stop;
+      setTimeout(stop, dur * 1000 + 300);
+    });
+    recorder.stop();
+    await done;
+    const actualDur = Math.min(MAX_VIDEO_SECONDS, Math.max(0.5, (Date.now() - startedAt) / 1000));
+    audioCtx?.close().catch(() => {});
+
+    const blob = new Blob(chunks, { type });
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(new Error("read-failed"));
+      fr.readAsDataURL(blob);
+    });
+    if (dataUrl.length > MAX_CLIP_CHARS) throw new Error("too-big");
+    onProgress?.(1);
+    return { dataUrl, type, poster: poster || canvas.toDataURL("image/jpeg", 0.6), w, h, dur: Math.round(actualDur * 10) / 10, kb: Math.round(dataUrl.length * 0.75 / 1024) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function handleVideoPick(file) {
+  if (!recorderType()) { LL.toast("This device can't prepare videos. Try sending a photo instead."); return; }
+  let cancelled = false;
+  const dlg = openDialog(`
+    <p class="eyebrow">Preparing video</p>
+    <h2>Getting your clip ready…</h2>
+    <p class="muted small">Only the first ${MAX_VIDEO_SECONDS} seconds are sent, made smaller so it's quick on data. This takes about as long as the clip.</p>
+    <div class="progress"><span id="vidBar" style="width:4%"></span></div>
+    <div class="share-actions"><button type="button" class="btn ghost" data-close>Cancel</button></div>`, null, () => { cancelled = true; });
+  try {
+    const clip = await shrinkVideo(file, p => { const bar = $("#vidBar", dlg); if (bar) bar.style.width = `${Math.round(p * 100)}%`; });
+    dlg.close();
+    if (!cancelled) confirmVideo(clip);
+  } catch (e) {
+    dlg.close();
+    console.warn(e);
+    LL.toast(e.message === "too-big" ? "That clip is too detailed to send on the free plan. Try a shorter one."
+      : e.message === "unreadable" ? "Couldn't read that video"
+      : "Couldn't prepare that video");
+  }
+}
+
+function confirmVideo(clip) {
+  openDialog(`
+    <p class="eyebrow">Send video</p>
+    <video class="photo-preview" src="${clip.dataUrl}" controls playsinline></video>
+    <form id="videoForm" class="stack">
+      <label>Caption (optional) <input id="videoCaption" maxlength="500" placeholder="Say something about it"></label>
+      <p class="muted small">${clip.dur}s · ${clip.kb} KB · only members of this group can see it.</p>
+      <div class="share-actions"><button class="btn" type="submit">Send video</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
+    </form>`, dlg => {
+    $("#videoForm", dlg).addEventListener("submit", async e => {
+      e.preventDefault();
+      const caption = $("#videoCaption", dlg).value.trim();
+      const ok = await run(async () => {
+        const gid = S.current;
+        const ref = doc(collection(db, "groups", gid, "messages"));
+        const batch = writeBatch(db);
+        batch.set(ref, { uid: S.user.uid, name: myName(), text: caption, kind: "video", w: clip.w, h: clip.h, dur: clip.dur, createdAt: serverTimestamp() });
+        batch.set(doc(db, "groups", gid, "photos", ref.id), { uid: S.user.uid, image: clip.poster, createdAt: serverTimestamp() });
+        batch.set(doc(db, "groups", gid, "videos", ref.id), { uid: S.user.uid, video: clip.dataUrl, type: clip.type, createdAt: serverTimestamp() });
+        await batch.commit();
+        photoCache.set(ref.id, clip.poster);
+        videoCache.set(ref.id, clip.dataUrl);
+      }, "Video sent");
+      if (ok) dlg.close();
+    });
+  });
+}
+
+async function viewVideo(m) {
+  let src = videoCache.get(m.id);
+  if (!src) {
+    LL.toast("Loading video…");
+    try {
+      const snap = await getDoc(doc(db, "groups", S.current, "videos", m.id));
+      if (!snap.exists()) { LL.toast("That video is no longer available"); return; }
+      src = snap.data().video;
+      videoCache.set(m.id, src);
+    } catch (e) { LL.toast(friendlyError(e)); return; }
+  }
+  openDialog(`
+    <p class="eyebrow">${esc(m.name)} · ${when(m.createdAt)}</p>
+    <video class="photo-full" src="${src}" controls autoplay playsinline></video>
+    ${m.text ? `<p>${esc(m.text)}</p>` : ""}
+    <div class="share-actions">
+      <button type="button" class="btn ghost" id="videoShare">Share / save</button>
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>`, dlg => {
+    $("#videoShare", dlg).addEventListener("click", () => LL.shareMedia(src, `video-${m.id}`, `Video from ${m.name}`));
+  });
+}
+
 function confirmPhoto(shot) {
   openDialog(`
     <p class="eyebrow">Send photo</p>
@@ -520,8 +684,10 @@ function confirmPhoto(shot) {
 function photoMarkup(m) {
   const ratio = m.w && m.h ? (m.h / m.w) * 100 : 75;
   const cached = photoCache.get(m.id);
-  return `<span class="msg-photo" data-photo="${m.id}" style="padding-bottom:${Math.min(140, Math.max(40, ratio))}%">
-    ${cached ? `<img src="${cached}" alt="Photo from ${esc(m.name)}">` : `<span class="photo-loading">📷</span>`}
+  const isVideo = m.kind === "video";
+  return `<span class="msg-photo${isVideo ? " is-video" : ""}" data-photo="${m.id}" style="padding-bottom:${Math.min(140, Math.max(40, ratio))}%">
+    ${cached ? `<img src="${cached}" alt="${isVideo ? "Video" : "Photo"} from ${esc(m.name)}">` : `<span class="photo-loading">${isVideo ? "🎬" : "📷"}</span>`}
+    ${isVideo ? `<span class="play-badge" aria-hidden="true">▶</span><span class="dur-badge">${Math.round(m.dur || 0)}s</span>` : ""}
   </span>`;
 }
 
@@ -571,9 +737,10 @@ function viewPhoto(m) {
 async function deleteMessage(gid, m) {
   const batch = writeBatch(db);
   batch.delete(doc(db, "groups", gid, "messages", m.id));
-  if (m.kind === "photo") batch.delete(doc(db, "groups", gid, "photos", m.id));
+  if (m.kind === "photo" || m.kind === "video") batch.delete(doc(db, "groups", gid, "photos", m.id));
+  if (m.kind === "video") batch.delete(doc(db, "groups", gid, "videos", m.id));
   await batch.commit();
-  photoCache.delete(m.id);
+  photoCache.delete(m.id); videoCache.delete(m.id);
 }
 async function postMessage({ text, kind, ref }) {
   const data = { uid: S.user.uid, name: myName(), text: text.slice(0, 2000), kind, createdAt: serverTimestamp(), ...(ref ? { ref } : {}) };
@@ -838,7 +1005,10 @@ function renderMembers(pane) {
     await run(async () => {
       const b2 = writeBatch(db);
       b2.delete(doc(db, "groups", S.current, r.targetType === "prayer" ? "prayers" : "messages", r.targetId));
-      if (r.targetType === "message") b2.delete(doc(db, "groups", S.current, "photos", r.targetId));
+      if (r.targetType === "message") {
+        b2.delete(doc(db, "groups", S.current, "photos", r.targetId));
+        b2.delete(doc(db, "groups", S.current, "videos", r.targetId));
+      }
       b2.delete(doc(db, "groups", S.current, "reports", r.id));
       await b2.commit();
     }, "Deleted");
@@ -898,7 +1068,7 @@ async function deleteDocsIn(refs) {
 }
 async function wipeGroup(gid, inviteCode) {
   const sub = async name => (await getDocs(collection(db, "groups", gid, name))).docs.map(d => d.ref);
-  await deleteDocsIn([...await sub("messages"), ...await sub("photos"), ...await sub("prayers"), ...await sub("reports"), ...await sub("bans")]);
+  await deleteDocsIn([...await sub("messages"), ...await sub("photos"), ...await sub("videos"), ...await sub("prayers"), ...await sub("reports"), ...await sub("bans")]);
   const members = (await getDocs(collection(db, "groups", gid, "members"))).docs;
   await deleteDocsIn(members.filter(d => d.id !== S.user.uid).map(d => d.ref));
   try { await deleteDoc(doc(db, "invites", inviteCode)); } catch (e) { /* already gone */ }
@@ -980,7 +1150,7 @@ function deleteAccountFlow() {
           } catch (err) { /* no longer a member */ }
         }
         const mineQ = name => getDocs(query(collectionGroup(db, name), where("uid", "==", user.uid)));
-        await deleteDocsIn([...(await mineQ("messages")).docs.map(d => d.ref), ...(await mineQ("photos")).docs.map(d => d.ref), ...(await mineQ("prayers")).docs.map(d => d.ref)]);
+        await deleteDocsIn([...(await mineQ("messages")).docs.map(d => d.ref), ...(await mineQ("photos")).docs.map(d => d.ref), ...(await mineQ("videos")).docs.map(d => d.ref), ...(await mineQ("prayers")).docs.map(d => d.ref)]);
         await deleteDocsIn((await mineQ("members")).docs.map(d => d.ref));
         await deleteDocsIn((await getDocs(collection(db, "users", user.uid, "blocked"))).docs.map(d => d.ref));
         await deleteDoc(doc(db, "users", user.uid));

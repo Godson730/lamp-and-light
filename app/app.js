@@ -1462,24 +1462,26 @@
       return { title: plan.title, day, label: dayLabel(plan.days[day - 1]), question: DISCUSSION_QUESTIONS[(day - 1) % DISCUSSION_QUESTIONS.length] };
     },
     pendingGroupInvite: null,
-    // let Groups hand a photo to the phone's share sheet (or the browser's download)
-    sharePhoto: async (dataUrl, title) => {
+    // let Groups hand a photo or video to the phone's share sheet (or the browser's download)
+    shareMedia: async (dataUrl, name, title) => {
       try {
         if (Share && Filesystem) {
           if (lastShareFile) Filesystem.deleteFile({ path: lastShareFile, directory: "CACHE" }).catch(() => {});
-          lastShareFile = `photo-${Date.now()}.jpg`;
+          const ext = /^data:video\/mp4/.test(dataUrl) ? "mp4" : /^data:video\//.test(dataUrl) ? "webm" : "jpg";
+          lastShareFile = `${name || "lamp-and-light"}-${Date.now()}.${ext}`;
           const file = await Filesystem.writeFile({ path: lastShareFile, data: dataUrl.split(",")[1], directory: "CACHE" });
           await Share.share({ files: [file.uri], dialogTitle: title || "Share photo" });
           return;
         }
         const blob = await (await fetch(dataUrl)).blob();
-        const file = new File([blob], "lamp-and-light-photo.jpg", { type: "image/jpeg" });
+        const file = new File([blob], `${name || "lamp-and-light"}.${blob.type.includes("mp4") ? "mp4" : blob.type.includes("webm") ? "webm" : "jpg"}`, { type: blob.type || "image/jpeg" });
         if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (e) { /* closed */ } return; }
         const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: file.name });
         document.body.appendChild(a); a.click(); a.remove();
-        toast("Photo saved to your downloads");
-      } catch (e) { toast("Couldn't share that photo"); }
-    }
+        toast("Saved to your downloads");
+      } catch (e) { toast("Couldn't share that file"); }
+    },
+    sharePhoto: (dataUrl, title) => window.LL.shareMedia(dataUrl, "photo", title)
   };
 
   /* ================= STUDY ================= */
