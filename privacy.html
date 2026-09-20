@@ -14,66 +14,94 @@
   h2 { font-size:1.2rem; margin:32px 0 8px; padding-top:16px; border-top:1px solid var(--line); }
   .muted { color:var(--muted); }
   a { color:var(--accent); }
+  .table-wrap { overflow-x:auto; }
   table { border-collapse:collapse; width:100%; margin:8px 0; }
   td, th { text-align:left; vertical-align:top; padding:8px; border-bottom:1px solid var(--line); }
 </style>
 </head>
 <body>
 <main>
-  <h1>Privacy Policy</h1>
-  <p class="muted">Lamp &amp; Light — Bible Study Guide · Effective date: September 13, 2026</p>
-
   <p><a href="./">← Back to Lamp &amp; Light</a></p>
-  <p>This policy explains how the Lamp &amp; Light app (Android) and its browser version (together, “the app”), published by Lamp &amp; Light, handles your information.
-  The short version: <strong>the app does not collect, share or sell any personal data.</strong> Everything you create stays on your device.</p>
+  <h1>Privacy Policy</h1>
+  <p class="muted">Lamp &amp; Light — Bible Study Guide · Effective date: September 15, 2026</p>
 
-  <h2>Information stored on your device</h2>
-  <p>To work, the app saves the following <em>only in its private storage on your phone</em>:</p>
-  <table>
+  <p>This policy explains how the Lamp &amp; Light app (Android) and its browser version (together, “the app”), published by Lamp &amp; Light,
+  handles your information. <strong>We never sell your data, show ads, or use tracking or analytics tools.</strong></p>
+  <p>Most of the app (the Bible, commentary, reading plans, study, fasting guide, reminders and audio) works entirely on your device and sends
+  nothing to us. Only the optional <strong>Groups</strong> feature stores information online, and only if you create a groups account.</p>
+
+  <h2>1. Information stored only on your device</h2>
+  <div class="table-wrap"><table>
     <tr><th>Data</th><th>Purpose</th></tr>
     <tr><td>Notes, journal entries, highlights and bookmarks</td><td>So you can return to your Bible study and fasting records</td></tr>
-    <tr><td>Study progress, fasting plan and fasting history</td><td>To show your weekly lesson, fasting schedule and streak</td></tr>
-    <tr><td>Reminder times and settings (theme, text size, optional first name for greetings)</td><td>To schedule reminders and personalise the app</td></tr>
-  </table>
-  <p>This information is never transmitted to us or to anyone else. We have no servers and no way to see it. In the browser version, the same information is kept in your browser's local storage on your device.</p>
+    <tr><td>Reading plan progress, study progress, fasting plan and history</td><td>To show your daily reading, weekly lesson and fasting schedule</td></tr>
+    <tr><td>Reminder times and settings (theme, text size, voice, optional first name for greetings)</td><td>To schedule reminders and personalise the app</td></tr>
+  </table></div>
+  <p>This information stays on your device. We have no way to see it.</p>
 
-  <h2>Information we collect</h2>
-  <p>None. The app has no accounts, no advertising, no analytics or tracking tools, and no third-party software development kits (SDKs)
-  that collect data. The complete Bible text is built into the app, so it does not connect to the internet to work.</p>
+  <h2>2. Groups (optional, requires an account)</h2>
+  <p>If you create a groups account, the following is stored with Google Firebase, the online service that runs groups:</p>
+  <div class="table-wrap"><table>
+    <tr><th>Data</th><th>Who can see it</th><th>Why</th></tr>
+    <tr><td>Email address and password</td><td>Nobody in the app. Passwords are handled by Firebase Authentication and are never visible to us.</td><td>To sign you in and reset a forgotten password</td></tr>
+    <tr><td>Display name, confirmation that you are 13 or older, and when you accepted the Community Guidelines</td><td>Your name is shown to members of groups you join</td><td>So members know who is posting</td></tr>
+    <tr><td>Groups you create or join, and your role (leader, co-leader, member)</td><td>Members of those groups</td><td>To run the group</td></tr>
+    <tr><td>Messages, verses and readings you post; prayer requests; “I prayed” marks</td><td>Members of that group only</td><td>Group chat and prayer wall</td></tr>
+    <tr><td>Which day of the group reading plan you've read</td><td>Members of that group</td><td>To show who has read today</td></tr>
+    <tr><td>Reports you file (the reported post, its author's name and the reason)</td><td>That group's leaders</td><td>To keep groups safe</td></tr>
+    <tr><td>People you block</td><td>Only you</td><td>To hide their posts from you</td></tr>
+  </table></div>
+  <p>Groups are private and invite-only; nothing is published publicly. Data is sent over encrypted connections (HTTPS) and may be stored on
+  Google's servers outside your country. The app developer can access groups data through the Firebase console, but only uses it to keep the
+  service running, investigate reports of abuse, or where required by law.</p>
+  <p>Google processes this data as our service provider under the <a href="https://firebase.google.com/support/privacy">Firebase privacy and security terms</a>.</p>
 
-  <h2>Permissions</h2>
-  <table>
-    <tr><th>Permission</th><th>Why it is used</th></tr>
-    <tr><td>Notifications</td><td>To show your prayer, Bible study and fasting reminders.</td></tr>
-    <tr><td>Alarms &amp; reminders (exact alarms)</td><td>Optional. Lets reminders ring at the exact minute you chose. If you don't allow it, Android may deliver reminders a few minutes late.</td></tr>
-    <tr><td>Run at startup</td><td>So your reminders are restored after your phone restarts.</td></tr>
-    <tr><td>Prevent phone from sleeping (wake lock)</td><td>Briefly used to deliver a reminder on time.</td></tr>
-  </table>
+  <h2>3. Keeping and deleting your data</h2>
+  <ul>
+    <li><strong>Messages and prayer requests</strong> stay until you delete them, a group leader removes them, or the group is deleted.</li>
+    <li><strong>Leaving a group</strong> removes your membership; your past posts stay unless you delete them or delete your account.</li>
+    <li><strong>Delete your account</strong> in the app: Groups › your name › <em>Delete my account</em>. This permanently deletes your account,
+      profile, messages, prayer requests, memberships and blocks, and deletes any groups you lead. You can also
+      <a href="delete-account.html">request deletion by email</a>.</li>
+    <li><strong>On-device data</strong> is removed with Settings › <em>Reset all data</em> or by uninstalling the app.</li>
+  </ul>
 
-  <h2>Read-aloud (audio Bible)</h2>
+  <h2>4. Read-aloud (audio Bible)</h2>
   <p>When you use “Listen”, the Bible text is spoken by your phone's or browser's own text-to-speech engine. The app sends nothing to us.
   Most voices work entirely on your device. If you choose a voice marked “needs internet”, your device's speech service (for example Google's)
   processes the text being read, under that provider's own privacy policy.</p>
 
-  <h2>Backups</h2>
-  <p>If Android backup is turned on for your device, Android may include the app's data in your personal device backup
-  (for example, to your Google account). That backup is controlled by you and Google under your device settings; we cannot access it.</p>
+  <h2>5. Sharing</h2>
+  <p>When you share a verse, reading or invite, it goes to the app you choose (for example WhatsApp) under that app's privacy policy.
+  Invite links only contain a reading-plan code or group code, not personal information.</p>
 
-  <h2>Deleting your data</h2>
-  <p>Open the app, tap the settings (gear) icon and choose <strong>Reset all data</strong>, or uninstall the app. Either removes everything the app stored.</p>
+  <h2>6. Permissions</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Permission</th><th>Why it is used</th></tr>
+    <tr><td>Internet</td><td>Only for Groups. Everything else works offline.</td></tr>
+    <tr><td>Notifications</td><td>To show your prayer, reading, study and fasting reminders.</td></tr>
+    <tr><td>Alarms &amp; reminders (exact alarms)</td><td>Optional. Lets reminders ring at the exact minute you chose.</td></tr>
+    <tr><td>Run at startup</td><td>So your reminders are restored after your phone restarts.</td></tr>
+    <tr><td>Prevent phone from sleeping (wake lock)</td><td>Briefly used to deliver a reminder on time.</td></tr>
+  </table></div>
 
-  <h2>Children</h2>
-  <p>The app does not knowingly collect personal information from anyone, including children under 13.</p>
+  <h2>7. Backups</h2>
+  <p>If Android backup is turned on, Android may include the app's on-device data in your personal device backup (for example, to your Google
+  account). That backup is controlled by you and Google; we cannot access it.</p>
 
-  <h2>Scripture texts</h2>
-  <p>The King James Version and World English Bible texts included in the app are in the public domain and were obtained from eBible.org.
-  “World English Bible” is a trademark of eBible.org.</p>
+  <h2>8. Children</h2>
+  <p>Groups are only for people aged 13 or older. We do not knowingly collect personal information from children under 13. If you believe a
+  child under 13 has created a groups account, please contact us and we will delete it.</p>
 
-  <h2>Changes to this policy</h2>
+  <h2>9. Scripture and commentary</h2>
+  <p>The King James Version and World English Bible texts are in the public domain and were obtained from eBible.org
+  (“World English Bible” is a trademark of eBible.org). The Jamieson-Fausset-Brown commentary (1871) is in the public domain.</p>
+
+  <h2>10. Changes to this policy</h2>
   <p>If this policy changes, the updated version will be posted on this page with a new effective date.</p>
 
   <h2>Contact</h2>
-  <p>Questions about this policy: <a href="mailto:jamesagyapong1234@gmail.com">jamesagyapong1234@gmail.com</a></p>
+  <p>Questions or requests about your data: <a href="mailto:jamesagyapong1234@gmail.com">jamesagyapong1234@gmail.com</a></p>
 </main>
 </body>
 </html>

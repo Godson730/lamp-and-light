@@ -171,6 +171,54 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; f
 .list .snippet { display: block; font-family: var(--serif); color: var(--muted); font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; border: 1px solid var(--line); }
 
+/* ---------- groups ---------- */
+.stack { display: grid; gap: 12px; }
+.stack label:not(.switch-row) { display: grid; gap: 4px; font-size: .88rem; color: var(--muted); font-weight: 500; }
+.seg { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 12px; margin-bottom: 14px; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 8px 6px; border-radius: 9px; font-weight: 600; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.seg button[aria-selected="true"] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+.auth-card .seg { margin-bottom: 16px; }
+.join-group { flex: 1; min-width: 220px; }
+.join-group input { text-transform: uppercase; font-family: ui-monospace, Consolas, monospace; letter-spacing: .08em; }
+.group-list, .member-list, .prayer-list, .member-reads { list-style: none; margin: 0; padding: 0; }
+.group-item { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; cursor: pointer; box-shadow: var(--shadow); color: var(--ink); }
+.group-item .grow { display: grid; min-width: 0; }
+.group-item .grow span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-avatar { flex: none; width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-family: var(--serif); font-weight: 700; font-size: 1.2rem; }
+.group-avatar.small { width: 32px; height: 32px; border-radius: 10px; font-size: .95rem; }
+.empty h2 { margin-bottom: 6px; }
+.group-head { display: flex; align-items: flex-start; gap: 12px; }
+.group-head h1 { margin-bottom: 2px; }
+.group-tabs button { font-size: .88rem; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--danger); color: #fff; font-size: .72rem; }
+.chat { display: flex; flex-direction: column; gap: 6px; height: clamp(220px, calc(100dvh - 430px - var(--inset-bottom)), 620px); overflow-y: auto; padding: 12px; background: var(--surface-2); border-radius: 16px; overscroll-behavior: contain; }
+.chat-empty { margin: auto; max-width: 280px; }
+.msg { max-width: 82%; align-self: flex-start; background: var(--surface); border-radius: 16px 16px 16px 4px; padding: 8px 12px 6px; box-shadow: 0 1px 1px rgba(0,0,0,.06); cursor: pointer; display: grid; }
+.msg.mine { align-self: flex-end; background: color-mix(in srgb, var(--accent) 16%, var(--surface)); border-radius: 16px 16px 4px 16px; }
+.msg-name { font-size: .75rem; font-weight: 700; color: var(--gold); }
+.msg-text { white-space: pre-wrap; word-break: break-word; }
+.msg.kind-verse .msg-text, .msg.kind-reading .msg-text { font-family: var(--serif); }
+.msg.kind-verse { border-left: 3px solid var(--gold); }
+.msg-time { font-size: .68rem; color: var(--muted); justify-self: end; margin-top: 2px; }
+.quick-posts { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 4px; }
+.quick-posts .chip { flex: none; }
+.composer { display: flex; gap: 8px; align-items: flex-end; margin-top: 6px; }
+.composer textarea { resize: none; font-family: var(--sans); min-height: 44px; max-height: 140px; }
+.prayer .prayer-text { white-space: pre-wrap; margin: 8px 0; font-family: var(--serif); }
+.prayer.answered { border-color: var(--ok); }
+.answered-badge { color: var(--ok); font-weight: 600; margin: 0 0 8px; }
+.member-list li, .member-reads li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.member-list li:first-child, .member-reads li:first-child { border-top: 0; }
+.member-reads li span { width: 20px; color: var(--muted); }
+.member-reads li.done span { color: var(--ok); font-weight: 700; }
+.menu-preview { white-space: pre-wrap; background: var(--surface-2); border-radius: 12px; padding: 10px 12px; max-height: 30vh; overflow-y: auto; font-size: .92rem; }
+.menu-list { display: grid; gap: 8px; }
+.report { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.report:first-of-type { border-top: 0; margin-top: 0; }
+.guidelines ol { padding-left: 1.2em; } .guidelines li { margin-bottom: 8px; }
+#guidelinesSheet form { max-height: 90vh; overflow-y: auto; }
+.tabbar button { font-size: .68rem; }
+
 /* ---------- sharing ---------- */
 #shareSheet form { max-height: 92vh; overflow-y: auto; }
 #shareCanvas { display: block; width: 100%; max-width: 340px; height: auto; margin: 0 auto 10px; border-radius: 14px; box-shadow: var(--shadow); }
@@ -317,7 +365,7 @@ li.read .reading-link { color: var(--muted); text-decoration: line-through; text
 /* ---------- tab bar ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   background: var(--surface); border-top: 1px solid var(--line);
   padding: 6px 8px calc(6px + var(--inset-bottom));
 }
@@ -329,13 +377,13 @@ li.read .reading-link { color: var(--muted); text-decoration: line-through; text
 .tabbar button.active { color: var(--accent); }
 .tabbar button.active .ti { filter: none; opacity: 1; }
 @media (min-width: 760px) {
-  .tabbar { left: 50%; right: auto; transform: translateX(-50%); width: 560px; bottom: 14px; border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 6px 8px; }
+  .tabbar { left: 50%; right: auto; transform: translateX(-50%); width: 640px; bottom: 14px; border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 6px 8px; }
 }
 
 /* ---------- dialogs ---------- */
 dialog { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: 100vw; }
 dialog::backdrop { background: rgba(20, 12, 6, .45); backdrop-filter: blur(2px); }
-.sheet form { background: var(--surface); border-radius: 20px; padding: 20px; width: min(520px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+.sheet form, .sheet .dialog-body { background: var(--surface); border-radius: 20px; padding: 20px; width: min(520px, calc(100vw - 32px)); box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto; }
 .swatches { display: flex; gap: 10px; margin: 6px 0 16px; }
 .sw { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; color: var(--muted); font-size: .9rem; }
 .sw.yellow { background: var(--hl-yellow); } .sw.green { background: var(--hl-green); }

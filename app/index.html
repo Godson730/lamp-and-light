@@ -117,6 +117,11 @@
       </details>
     </section>
 
+    <!-- GROUPS (built by groups.js) -->
+    <section class="view" id="view-groups" data-view="groups" hidden>
+      <div id="groupsBody"></div>
+    </section>
+
     <!-- READING PLAN -->
     <section class="view" id="view-plan" data-view="plan" hidden>
       <button class="link small back-link" data-goto="today">‹ Today</button>
@@ -290,6 +295,7 @@
   <nav class="tabbar" aria-label="Main">
     <button data-tab="today" class="active"><span class="ti">☀</span>Today</button>
     <button data-tab="bible"><span class="ti">📖</span>Bible</button>
+    <button data-tab="groups"><span class="ti">👥</span>Groups</button>
     <button data-tab="study"><span class="ti">✎</span>Study</button>
     <button data-tab="fast"><span class="ti">🕊</span>Fast</button>
     <button data-tab="alarms"><span class="ti">⏰</span>Alarms</button>
@@ -329,6 +335,7 @@
       <div class="share-actions">
         <button type="button" class="btn whatsapp" id="shareWhatsApp">WhatsApp</button>
         <button type="button" class="btn" id="shareImageBtn" hidden>Share picture</button>
+        <button type="button" class="btn ghost" id="shareToGroup" hidden>Post to a group</button>
         <button type="button" class="btn ghost" id="shareNative">More apps…</button>
         <button type="button" class="btn ghost" id="shareCopy">Copy</button>
         <button value="close" class="btn ghost">Close</button>
@@ -361,6 +368,28 @@
         <button value="chapter" class="btn">Whole chapter</button>
         <button value="close" class="btn ghost">Close</button>
       </div>
+    </form>
+  </dialog>
+
+  <!-- Community guidelines for groups -->
+  <dialog id="guidelinesSheet" class="sheet">
+    <form method="dialog">
+      <p class="eyebrow">Groups</p>
+      <h2>Community Guidelines</h2>
+      <div class="guidelines">
+        <p>Lamp &amp; Light groups are for encouraging one another in God's Word. “Let all your things be done with charity” (1 Corinthians 16:14).</p>
+        <ol>
+          <li><strong>Be kind and respectful.</strong> Speak with patience and grace, even when you disagree.</li>
+          <li><strong>No harassment, hate, bullying, threats, or sexual content.</strong></li>
+          <li><strong>Never ask for money, bank or mobile-money details, passwords, or personal information.</strong> Report anyone who does. Real leaders will not ask for these in a chat.</li>
+          <li><strong>No spam, advertising, or pushing others to leave their church or join outside groups.</strong></li>
+          <li><strong>Protect privacy.</strong> Don't share other people's prayer requests or personal details outside the group.</li>
+          <li><strong>You must be 13 or older</strong> to use groups.</li>
+          <li><strong>Leaders can remove messages and members</strong> who break these guidelines. Illegal content may be reported to the authorities.</li>
+        </ol>
+        <p class="muted small">Use <strong>Report</strong> and <strong>Block</strong> on any message or prayer request. If someone is in danger, contact local emergency services right away.</p>
+      </div>
+      <div class="share-actions"><button value="close" class="btn">OK</button></div>
     </form>
   </dialog>
 
@@ -430,7 +459,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">1.4.0</span></p>
+      <p class="muted small">Version <span id="appVersion">1.5.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>
@@ -444,5 +473,6 @@
   <script src="data.js"></script>
   <script src="plans.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="groups.js"></script>
 </body>
 </html>

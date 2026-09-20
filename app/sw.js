@@ -1,7 +1,7 @@
 /* Offline support + notification handling for Lamp & Light. */
-const SHELL = "lamp-light-shell-v8";
+const SHELL = "lamp-light-shell-v10";
 const BIBLE = "lamp-light-bible-v3";
-const ASSETS = ["./", "index.html", "styles.css", "data.js", "plans.js", "app.js", "capacitor.js", "icon.svg", "manifest.json"];
+const ASSETS = ["./", "index.html", "styles.css", "data.js", "plans.js", "app.js", "groups.js", "firebase-config.js", "capacitor.js", "icon.svg", "manifest.json"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(SHELL).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

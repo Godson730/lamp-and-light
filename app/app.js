@@ -164,7 +164,7 @@
   }
 
   /* ================= navigation ================= */
-  const VIEWS = ["today", "bible", "study", "fast", "alarms", "plan"];
+  const VIEWS = ["today", "bible", "groups", "study", "fast", "alarms", "plan"];
   function show(view) {
     if (!VIEWS.includes(view)) view = "today";
     $$(".view").forEach(v => { v.hidden = v.dataset.view !== view; });
@@ -805,6 +805,8 @@
     arr[i] = value;
     if (arr.every(v => !v)) delete state.plan.done[day];
     save();
+    // lets groups following the same plan tick this reader off
+    window.dispatchEvent(new CustomEvent("ll:read", { detail: { day, complete: dayComplete(plan, day) } }));
   }
   function openReading(day, i) {
     const [b, c1] = planDef().days[day - 1][i];
@@ -1275,6 +1277,7 @@
     $("#shareEyebrow").textContent = eyebrow;
     $("#shareTextPreview").textContent = text;
     $("#shareImageArea").hidden = !verse; $("#shareImageBtn").hidden = !verse;
+    $("#shareToGroup").hidden = !window.LLGroups?.canPost() || /Let's read the Bible together|You're invited to join/.test(text);
     $("#shareTextPreview").hidden = !!verse;
     if (verse) renderShareCard();
     if (!shareSheet.open) shareSheet.showModal();
@@ -1292,6 +1295,13 @@
   $("#shareWhatsApp").addEventListener("click", () => openWhatsApp(shareState.text));
   $("#shareNative").addEventListener("click", () => shareViaApps(shareState.text));
   $("#shareCopy").addEventListener("click", () => copyText(shareState.text));
+  // Post the shared item into one of your groups (text without the website link)
+  $("#shareToGroup").addEventListener("click", () => {
+    const text = shareState.text.replace(/\n*(Read along with us|Shared from Lamp & Light|Pray with us|Study with us|Let's read the Bible together)[\s\S]*$/, "").trim();
+    const verse = shareState.verse;
+    shareSheet.close();
+    window.LLGroups?.pickGroupAndPost(verse ? { text: `“${verse.text}”\n— ${verse.ref}`, kind: "verse", ref: verse.ref } : { text, kind: "text" });
+  });
   $("#shareImageBtn").addEventListener("click", async () => {
     const canvas = $("#shareCanvas");
     try {
@@ -1372,12 +1382,46 @@
   $("#joinInStep").addEventListener("click", () => finishJoin(true));
   $("#joinFromStart").addEventListener("click", () => finishJoin(false));
   function checkJoinHash() {
+    const g = location.hash.match(/^#group=([A-Za-z0-9]{8})/);
+    if (g) {
+      history.replaceState(null, "", "#groups");
+      openGroupInvite(g[1]);
+      return true;
+    }
     const m = location.hash.match(/^#join=([\w-]+)/i);
     if (!m) return false;
     history.replaceState(null, "", "#today");
     setTimeout(() => handleJoinCode(m[1]), 250);
     return true;
   }
+  // Group invites are handled by groups.js, which loads after this script
+  function openGroupInvite(code) {
+    if (window.LLGroups) window.LLGroups.openInvite(code);
+    else { window.LL.pendingGroupInvite = code.toUpperCase(); setTimeout(() => show("groups"), 0); }
+  }
+
+  /* ================= GROUPS BRIDGE (used by groups.js) ================= */
+  render.groups = () => {
+    if (window.LLGroups) window.LLGroups.render();
+    else $("#groupsBody").innerHTML = `<h1>Groups</h1><p class="loading">Loading…</p>`;
+  };
+  window.LL = {
+    NATIVE, SITE, PLANS, escapeHtml, toast, show, copyText, dateKey, parsePlanCode, buildBookPlan, dayLabel,
+    openShare: opts => openShare(opts),
+    handleJoinCode: code => handleJoinCode(code),
+    openExternal: url => { if (NATIVE) location.href = url; else window.open(url, "_blank", "noopener"); },
+    votd: () => { const v = VERSES[dayOfYear(new Date()) % VERSES.length]; return { ref: v.ref, text: v.text }; },
+    currentPlanCode: () => (planDef() ? planCode() : null),
+    currentPlanTitle: () => planDef()?.title || "",
+    openTodayReading: () => openNextReading(),
+    todayReading: () => {
+      const plan = planDef(); if (!plan) return null;
+      const s = planStats(plan); if (s.finished) return null;
+      const day = Math.min(s.focus, plan.days.length);
+      return { title: plan.title, day, label: dayLabel(plan.days[day - 1]), question: DISCUSSION_QUESTIONS[(day - 1) % DISCUSSION_QUESTIONS.length] };
+    },
+    pendingGroupInvite: null
+  };
 
   /* ================= STUDY ================= */
   let selectedLesson = null;
@@ -2021,6 +2065,8 @@
     // Android back button: close dialogs, then go to Today, then leave the app
     // Invite links: lampandlight://join?c=CODE (from the website's "Open in the app" button)
     const joinFromUrl = url => {
+      const g = String(url || "").match(/[?&]g=([A-Za-z0-9]{8})/);
+      if (g) { openGroupInvite(g[1]); return; }
       const m = String(url || "").match(/[?&]c=([\w-]+)/i);
       if (m) handleJoinCode(m[1]);
     };
@@ -2030,6 +2076,7 @@
     AppPlugin.addListener("backButton", () => {
       const open = $$("dialog[open]");
       if (open.length) { open.forEach(d => (d.id === "alarmRing" ? stopRing() : d.close("close"))); return; }
+      if (window.LLGroups?.handleBack()) return;   // inside a group: back to the group list
       if ((location.hash.slice(1) || "today") !== "today") show("today");
       else AppPlugin.exitApp();
     });
