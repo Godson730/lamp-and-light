@@ -1461,7 +1461,25 @@
       const day = Math.min(s.focus, plan.days.length);
       return { title: plan.title, day, label: dayLabel(plan.days[day - 1]), question: DISCUSSION_QUESTIONS[(day - 1) % DISCUSSION_QUESTIONS.length] };
     },
-    pendingGroupInvite: null
+    pendingGroupInvite: null,
+    // let Groups hand a photo to the phone's share sheet (or the browser's download)
+    sharePhoto: async (dataUrl, title) => {
+      try {
+        if (Share && Filesystem) {
+          if (lastShareFile) Filesystem.deleteFile({ path: lastShareFile, directory: "CACHE" }).catch(() => {});
+          lastShareFile = `photo-${Date.now()}.jpg`;
+          const file = await Filesystem.writeFile({ path: lastShareFile, data: dataUrl.split(",")[1], directory: "CACHE" });
+          await Share.share({ files: [file.uri], dialogTitle: title || "Share photo" });
+          return;
+        }
+        const blob = await (await fetch(dataUrl)).blob();
+        const file = new File([blob], "lamp-and-light-photo.jpg", { type: "image/jpeg" });
+        if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch (e) { /* closed */ } return; }
+        const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: file.name });
+        document.body.appendChild(a); a.click(); a.remove();
+        toast("Photo saved to your downloads");
+      } catch (e) { toast("Couldn't share that photo"); }
+    }
   };
 
   /* ================= STUDY ================= */

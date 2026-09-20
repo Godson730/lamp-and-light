@@ -413,7 +413,8 @@ function renderChat(pane) {
       ${visibleMsgs.length ? visibleMsgs.map(m => `
         <div class="msg ${m.uid === me ? "mine" : ""} kind-${esc(m.kind)}" data-msg="${m.id}" tabindex="0">
           ${m.uid === me ? "" : `<span class="msg-name">${esc(m.name)}</span>`}
-          <span class="msg-text">${esc(m.text)}</span>
+          ${m.kind === "photo" ? photoMarkup(m) : ""}
+          ${m.text ? `<span class="msg-text">${esc(m.text)}</span>` : ""}
           <span class="msg-time">${when(m.createdAt)}</span>
         </div>`).join("") : `<p class="muted center chat-empty">No messages yet. Say hello and share what God is teaching you! 👋</p>`}
       ${hidden ? `<p class="muted small center">${hidden} message${hidden > 1 ? "s" : ""} hidden from people you blocked</p>` : ""}
@@ -423,7 +424,9 @@ function renderChat(pane) {
       <button type="button" class="chip" id="postVerse">✝ Share verse of the day</button>
     </div>
     <form class="composer" id="chatForm">
-      <textarea id="chatInput" rows="1" maxlength="2000" placeholder="Message ${esc(S.group.name)}" aria-label="Message"></textarea>
+      <input type="file" id="photoPicker" accept="image/*" hidden>
+      <button type="button" class="pl-btn attach" id="attachPhoto" aria-label="Send a photo" title="Send a photo">📷</button>
+      <textarea id="chatInput" rows="1" maxlength="2000" placeholder="Write a message…" aria-label="Message ${esc(S.group.name)}"></textarea>
       <button class="btn" type="submit" aria-label="Send">Send</button>
     </form>`;
   const list = $("#chatList"); list.scrollTop = list.scrollHeight;
@@ -442,7 +445,135 @@ function renderChat(pane) {
   const pr = $("#postReading");
   if (pr) pr.addEventListener("click", () => postMessage({ text: `📖 ${reading.title} · Day ${reading.day}\nToday's reading: ${reading.label}\n\n💬 ${reading.question}`, kind: "reading", ref: reading.label.slice(0, 60) }));
   $("#postVerse").addEventListener("click", () => { const v = LL.votd(); postMessage({ text: `“${v.text}”\n— ${v.ref}`, kind: "verse", ref: v.ref }); });
-  $$("[data-msg]", pane).forEach(b => b.addEventListener("click", () => messageMenu(S.messages.find(m => m.id === b.dataset.msg))));
+  $$("[data-msg]", pane).forEach(b => b.addEventListener("click", e => {
+    const m = S.messages.find(x => x.id === b.dataset.msg);
+    if (e.target.closest(".msg-photo") && m?.kind === "photo") viewPhoto(m);   // tap the picture to enlarge
+    else messageMenu(m);
+  }));
+  $("#attachPhoto").addEventListener("click", () => $("#photoPicker").click());
+  $("#photoPicker").addEventListener("change", async e => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (/^video\//.test(file.type)) { LL.toast("Videos can't be sent yet — send a photo, or paste a video link"); return; }
+    if (!/^image\//.test(file.type)) { LL.toast("Please choose a photo"); return; }
+    try {
+      const shot = await shrinkPhoto(file);
+      confirmPhoto(shot);
+    } catch (err) { console.warn(err); LL.toast("Couldn't read that photo"); }
+  });
+  loadVisiblePhotos(pane);
+}
+
+/* ----- photos ----- */
+const photoCache = new Map();          // message id -> data URL
+const MAX_PHOTO_CHARS = 690000;        // the rules cap the stored string at 700,000
+
+// Shrink to something sensible for a chat: long side 1280px, then lower quality until it fits
+async function shrinkPhoto(file) {
+  const bitmap = await createImageBitmap(file).catch(async () => {
+    const img = new Image(); img.src = URL.createObjectURL(file);
+    await img.decode(); return img;
+  });
+  const w0 = bitmap.width || bitmap.naturalWidth, h0 = bitmap.height || bitmap.naturalHeight;
+  let scale = Math.min(1, 1280 / Math.max(w0, h0));
+  let quality = 0.72, dataUrl = "", w = 0, h = 0;
+  for (let attempt = 0; attempt < 7; attempt++) {
+    w = Math.max(1, Math.round(w0 * scale)); h = Math.max(1, Math.round(h0 * scale));
+    const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    dataUrl = canvas.toDataURL("image/jpeg", quality);
+    if (dataUrl.length <= MAX_PHOTO_CHARS) break;
+    if (quality > 0.45) quality -= 0.12; else scale *= 0.8;
+  }
+  if (dataUrl.length > MAX_PHOTO_CHARS) throw new Error("too big");
+  return { dataUrl, w, h, kb: Math.round(dataUrl.length * 0.75 / 1024) };
+}
+
+function confirmPhoto(shot) {
+  openDialog(`
+    <p class="eyebrow">Send photo</p>
+    <img class="photo-preview" src="${shot.dataUrl}" alt="Photo to send">
+    <form id="photoForm" class="stack">
+      <label>Caption (optional) <input id="photoCaption" maxlength="500" placeholder="Say something about it"></label>
+      <p class="muted small">${shot.kb} KB · only members of this group can see it.</p>
+      <div class="share-actions"><button class="btn" type="submit">Send photo</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
+    </form>`, dlg => {
+    $("#photoForm", dlg).addEventListener("submit", async e => {
+      e.preventDefault();
+      const caption = $("#photoCaption", dlg).value.trim();
+      const ok = await run(async () => {
+        const gid = S.current;
+        const ref = doc(collection(db, "groups", gid, "messages"));
+        const batch = writeBatch(db);
+        batch.set(ref, { uid: S.user.uid, name: myName(), text: caption, kind: "photo", w: shot.w, h: shot.h, createdAt: serverTimestamp() });
+        batch.set(doc(db, "groups", gid, "photos", ref.id), { uid: S.user.uid, image: shot.dataUrl, createdAt: serverTimestamp() });
+        await batch.commit();
+        photoCache.set(ref.id, shot.dataUrl);
+      }, "Photo sent");
+      if (ok) dlg.close();
+    });
+  });
+}
+
+function photoMarkup(m) {
+  const ratio = m.w && m.h ? (m.h / m.w) * 100 : 75;
+  const cached = photoCache.get(m.id);
+  return `<span class="msg-photo" data-photo="${m.id}" style="padding-bottom:${Math.min(140, Math.max(40, ratio))}%">
+    ${cached ? `<img src="${cached}" alt="Photo from ${esc(m.name)}">` : `<span class="photo-loading">📷</span>`}
+  </span>`;
+}
+
+// Photos download only when they scroll into view, so opening a chat stays light
+function loadVisiblePhotos(pane) {
+  const holders = $$(".msg-photo[data-photo]", pane).filter(el => !photoCache.has(el.dataset.photo));
+  if (!holders.length) return;
+  const observer = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const el = entry.target, id = el.dataset.photo;
+      observer.unobserve(el);
+      if (photoCache.has(id)) { showPhoto(el, photoCache.get(id)); continue; }
+      getDoc(doc(db, "groups", S.current, "photos", id))
+        .then(snap => {
+          if (!snap.exists()) { el.innerHTML = `<span class="photo-loading">Photo unavailable</span>`; return; }
+          photoCache.set(id, snap.data().image);
+          showPhoto(el, snap.data().image);
+        })
+        .catch(() => { el.innerHTML = `<span class="photo-loading">Couldn't load</span>`; });
+    }
+  }, { root: $("#chatList"), rootMargin: "300px" });
+  holders.forEach(el => observer.observe(el));
+}
+function showPhoto(el, src) {
+  const msg = el.closest(".msg");
+  el.innerHTML = `<img src="${src}" alt="Photo${msg ? " from " + (msg.querySelector(".msg-name")?.textContent || "you") : ""}">`;
+  const list = $("#chatList");
+  if (list && list.scrollHeight - list.scrollTop - list.clientHeight < 200) list.scrollTop = list.scrollHeight;
+}
+
+function viewPhoto(m) {
+  const src = photoCache.get(m.id);
+  if (!src) { LL.toast("Still loading…"); return; }
+  openDialog(`
+    <p class="eyebrow">${esc(m.name)} · ${when(m.createdAt)}</p>
+    <img class="photo-full" src="${src}" alt="Photo from ${esc(m.name)}">
+    ${m.text ? `<p>${esc(m.text)}</p>` : ""}
+    <div class="share-actions">
+      <button type="button" class="btn ghost" id="photoShare">Share / save</button>
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>`, dlg => {
+    $("#photoShare", dlg).addEventListener("click", () => LL.sharePhoto(src, `Photo from ${m.name}`));
+  });
+}
+// deletes a message and, for photos, the picture stored alongside it
+async function deleteMessage(gid, m) {
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "groups", gid, "messages", m.id));
+  if (m.kind === "photo") batch.delete(doc(db, "groups", gid, "photos", m.id));
+  await batch.commit();
+  photoCache.delete(m.id);
 }
 async function postMessage({ text, kind, ref }) {
   const data = { uid: S.user.uid, name: myName(), text: text.slice(0, 2000), kind, createdAt: serverTimestamp(), ...(ref ? { ref } : {}) };
@@ -472,7 +603,7 @@ function messageMenu(m) {
     $("#mBlock", dlg)?.addEventListener("click", () => { dlg.close(); blockPerson(m.uid, m.name); });
     $("#mDelete", dlg)?.addEventListener("click", async () => {
       if (!confirm("Delete this message for everyone?")) return;
-      if (await run(() => deleteDoc(doc(db, "groups", S.current, "messages", m.id)), "Message deleted")) dlg.close();
+      if (await run(() => deleteMessage(S.current, m), "Message deleted")) dlg.close();
     });
   });
 }
@@ -707,6 +838,7 @@ function renderMembers(pane) {
     await run(async () => {
       const b2 = writeBatch(db);
       b2.delete(doc(db, "groups", S.current, r.targetType === "prayer" ? "prayers" : "messages", r.targetId));
+      if (r.targetType === "message") b2.delete(doc(db, "groups", S.current, "photos", r.targetId));
       b2.delete(doc(db, "groups", S.current, "reports", r.id));
       await b2.commit();
     }, "Deleted");
@@ -766,7 +898,7 @@ async function deleteDocsIn(refs) {
 }
 async function wipeGroup(gid, inviteCode) {
   const sub = async name => (await getDocs(collection(db, "groups", gid, name))).docs.map(d => d.ref);
-  await deleteDocsIn([...await sub("messages"), ...await sub("prayers"), ...await sub("reports"), ...await sub("bans")]);
+  await deleteDocsIn([...await sub("messages"), ...await sub("photos"), ...await sub("prayers"), ...await sub("reports"), ...await sub("bans")]);
   const members = (await getDocs(collection(db, "groups", gid, "members"))).docs;
   await deleteDocsIn(members.filter(d => d.id !== S.user.uid).map(d => d.ref));
   try { await deleteDoc(doc(db, "invites", inviteCode)); } catch (e) { /* already gone */ }
@@ -848,7 +980,7 @@ function deleteAccountFlow() {
           } catch (err) { /* no longer a member */ }
         }
         const mineQ = name => getDocs(query(collectionGroup(db, name), where("uid", "==", user.uid)));
-        await deleteDocsIn([...(await mineQ("messages")).docs.map(d => d.ref), ...(await mineQ("prayers")).docs.map(d => d.ref)]);
+        await deleteDocsIn([...(await mineQ("messages")).docs.map(d => d.ref), ...(await mineQ("photos")).docs.map(d => d.ref), ...(await mineQ("prayers")).docs.map(d => d.ref)]);
         await deleteDocsIn((await mineQ("members")).docs.map(d => d.ref));
         await deleteDocsIn((await getDocs(collection(db, "users", user.uid, "blocked"))).docs.map(d => d.ref));
         await deleteDoc(doc(db, "users", user.uid));
