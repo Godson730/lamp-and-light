@@ -14,7 +14,7 @@ export const projectConfig = {
    null  → the Groups tab shows "Coming soon" (used until the security rules are uploaded to the project)
    projectConfig → Groups are live
    Flip this to `projectConfig` once `firebase deploy --only firestore` has run. */
-export const firebaseConfig = null;
+export const firebaseConfig = projectConfig;
 
 /* Local testing only: on this PC's test server, run `localStorage.setItem("ll-use-emulator", "1")` in the
    browser console to use the Firebase emulator instead (never used by the Android app or the public website). */

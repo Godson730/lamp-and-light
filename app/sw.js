@@ -1,5 +1,5 @@
 /* Offline support + notification handling for Lamp & Light. */
-const SHELL = "lamp-light-shell-v10";
+const SHELL = "lamp-light-shell-v11";
 const BIBLE = "lamp-light-bible-v3";
 const ASSETS = ["./", "index.html", "styles.css", "data.js", "plans.js", "app.js", "groups.js", "firebase-config.js", "capacitor.js", "icon.svg", "manifest.json"];
 
