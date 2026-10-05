@@ -39,6 +39,8 @@
 
       <article class="card" id="todayFast"></article>
 
+      <article class="card" id="todayPrayer"></article>
+
       <article class="card">
         <p class="eyebrow">This week's study</p>
         <h2 id="todayStudyTitle"></h2>
@@ -149,6 +151,26 @@
       <div id="planBody"></div>
     </section>
 
+    <!-- PRAYER LIST -->
+    <section class="view" id="view-prayer" data-view="prayer" hidden>
+      <button class="link small back-link" data-goto="today">‹ Today</button>
+      <p class="eyebrow">Prayer</p>
+      <div class="row between wrap">
+        <h1>My prayer list</h1>
+        <button class="btn" id="addPrayer">+ Add request</button>
+      </div>
+      <p class="lead">“Be careful for nothing; but in every thing by prayer and supplication with thanksgiving let your requests be made known unto God.” <button class="link" data-ref="Philippians 4:6">Philippians 4:6</button></p>
+
+      <div class="chips prayer-tabs" role="tablist" aria-label="Prayer list">
+        <button class="chip active" role="tab" data-ptab="praying">Praying <span id="prayingCount"></span></button>
+        <button class="chip" role="tab" data-ptab="answered">Answered <span id="answeredCount"></span></button>
+      </div>
+      <div class="chips prayer-filter" id="prayerFilter" aria-label="Show"></div>
+
+      <article class="card prayer-today" id="prayerToday" hidden></article>
+      <ul class="prayer-list" id="prayerList"></ul>
+    </section>
+
     <!-- STUDY -->
     <section class="view" id="view-study" data-view="study" hidden>
       <div class="row between">
@@ -201,6 +223,8 @@
           <button type="button" class="btn ghost small" id="shareFast">Share with group</button>
         </div>
         <ul class="checklist" id="fastPrayerPoints"></ul>
+        <p class="muted small fast-prayer-link">Add your own requests too:
+          <button class="link" data-goto="prayer">open my prayer list</button></p>
       </article>
 
       <article class="card">
@@ -463,6 +487,52 @@
     </div>
   </dialog>
 
+  <!-- Prayer request: add / edit -->
+  <dialog id="prayerSheet" class="sheet">
+    <div class="dialog-body">
+      <p class="eyebrow" id="prayerSheetTitle">New prayer request</p>
+      <form id="prayerForm" class="form-grid">
+        <label class="span-2">What are you praying for?
+          <input id="prayerText" required maxlength="140" placeholder="e.g. Healing for Mum, a job for Kofi">
+        </label>
+        <label class="span-2">Details <span class="muted">(optional)</span>
+          <textarea id="prayerDetails" rows="3" maxlength="2000" placeholder="Anything you want to remember as you pray"></textarea>
+        </label>
+        <label>For
+          <select id="prayerCategory"></select>
+        </label>
+        <label>Scripture to stand on <span class="muted">(optional)</span>
+          <input id="prayerRef" maxlength="40" placeholder="e.g. Isaiah 41:10">
+        </label>
+        <div class="span-2 share-actions">
+          <button class="btn" type="submit" id="prayerSave">Add to my list</button>
+          <button type="button" class="btn ghost" id="prayerCancel">Cancel</button>
+          <button type="button" class="btn ghost danger" id="prayerDelete" hidden>Delete</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Prayer request: mark answered -->
+  <dialog id="answerSheet" class="sheet">
+    <div class="dialog-body">
+      <p class="eyebrow">Answered prayer 🙌</p>
+      <h2 id="answerTitle"></h2>
+      <form id="answerForm" class="form-grid">
+        <label>Answered on
+          <input type="date" id="answerDate" required>
+        </label>
+        <label class="span-2">How did God answer? <span class="muted">(optional)</span>
+          <textarea id="answerNote" rows="4" maxlength="2000" placeholder="Write down what happened so you remember His faithfulness"></textarea>
+        </label>
+        <div class="span-2 share-actions">
+          <button class="btn" type="submit">Mark as answered</button>
+          <button type="button" class="btn ghost" id="answerCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
   <!-- Community guidelines for groups -->
   <dialog id="guidelinesSheet" class="sheet">
     <form method="dialog">
@@ -583,7 +653,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">2.4.0</span></p>
+      <p class="muted small">Version <span id="appVersion">2.5.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>

@@ -34,6 +34,7 @@
     fast: { day: 3, type: "normal", start: "06:00", end: "18:00", remind: true },
     fastWeeks: {},           // weekKey -> {points:[bool], journal, done}
     fastHistory: [],         // [{week, date, title, type}]
+    prayers: [],             // personal prayer list, see PRAYER LIST section
     plan: null,              // active reading plan, see READING PLAN section
     tone: "chime",           // default alarm sound; each reminder may override it
     audio: { rate: 1, voice: "", continue: true },   // read-aloud settings
@@ -208,11 +209,11 @@
   }
 
   /* ================= navigation ================= */
-  const VIEWS = ["today", "bible", "groups", "study", "fast", "alarms", "plan"];
+  const VIEWS = ["today", "bible", "groups", "study", "fast", "alarms", "plan", "prayer"];
   function show(view) {
     if (!VIEWS.includes(view)) view = "today";
     $$(".view").forEach(v => { v.hidden = v.dataset.view !== view; });
-    $$(".tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === (view === "plan" ? "today" : view)));
+    $$(".tabbar button").forEach(b => b.classList.toggle("active", b.dataset.tab === (view === "plan" || view === "prayer" ? "today" : view)));
     if (location.hash.slice(1) !== view) history.replaceState(null, "", "#" + view);
     window.scrollTo({ top: 0 });
     render[view]();
@@ -284,6 +285,7 @@
     $("#continueRef").textContent = `${state.last.book} ${state.last.chapter}`;
 
     renderTodayPlan();
+    renderTodayPrayer();
   };
   function relWhen(d) {
     const today = dateKey(new Date()), tomorrow = dateKey(new Date(Date.now() + 864e5));
@@ -2170,6 +2172,7 @@
     const kind = ringing?.kind;
     stopRing();
     if (kind === "fast") show("fast"); else if (kind === "study") show("study"); else if (kind === "reading") openNextReading();
+    else if (kind === "prayer" && activePrayers().length) show("prayer");
   });
   $("#ringSnooze").addEventListener("click", () => {
     if (ringing && ringing.id !== "test") {
@@ -2240,6 +2243,220 @@
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
     toast("Open the downloaded file to add reminders to your calendar");
+  });
+
+  /* ================= PRAYER LIST ================= */
+  // state.prayers: [{id, text, details, cat, ref, created: "YYYY-MM-DD", count, days: ["YYYY-MM-DD", …recent], answered: null | {date, note}}]
+  const PRAYER_CATS = [
+    { id: "self", name: "Myself", icon: "🙋" },
+    { id: "family", name: "Family", icon: "🏠" },
+    { id: "friends", name: "Friends", icon: "🤝" },
+    { id: "church", name: "Church", icon: "⛪" },
+    { id: "work", name: "Work & school", icon: "💼" },
+    { id: "health", name: "Health", icon: "❤️" },
+    { id: "nation", name: "Nation & world", icon: "🌍" },
+    { id: "thanks", name: "Thanksgiving", icon: "🙌" },
+    { id: "other", name: "Other", icon: "🙏" }
+  ];
+  const prayerCat = id => PRAYER_CATS.find(c => c.id === id) || PRAYER_CATS[PRAYER_CATS.length - 1];
+  const activePrayers = () => state.prayers.filter(p => !p.answered);
+  const answeredPrayers = () => state.prayers.filter(p => p.answered)
+    .sort((a, b) => b.answered.date.localeCompare(a.answered.date));
+  const prayedToday = p => p.days?.[p.days.length - 1] === dateKey(new Date());
+  const fmtDay = key => parseDate(key).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+  const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 864e5);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  let prayerTab = "praying", prayerFilter = "";
+
+  function renderTodayPrayer() {
+    const card = $("#todayPrayer");
+    const active = activePrayers(), answered = state.prayers.length - active.length;
+    if (!state.prayers.length) {
+      card.innerHTML = `<p class="eyebrow">My prayer list</p>
+        <p class="muted">Keep track of the people and needs you're praying for, and write down how God answers.</p>
+        <button class="btn" data-goto="prayer">Start my prayer list</button>`;
+      return;
+    }
+    const done = active.filter(prayedToday).length;
+    const pct = active.length ? Math.round(done / active.length * 100) : 100;
+    card.innerHTML = `<p class="eyebrow">My prayer list</p>
+      <h3>${active.length ? (done === active.length ? "You've prayed through your list today 🙏" : `Prayed for ${done} of ${active.length} today`) : "Nothing on your list right now"}</h3>
+      ${active.length ? `<div class="progress"><span style="width:${pct}%"></span></div>` : ""}
+      <div class="row between">
+        <span class="muted small">${answered ? `🙌 ${plural(answered, "answered prayer")}` : ""}</span>
+        <button class="btn${done === active.length ? " ghost" : ""}" data-goto="prayer">${active.length && done < active.length ? "Pray now" : "Open list"}</button>
+      </div>`;
+  }
+
+  render.prayer = () => {
+    const active = activePrayers(), answered = answeredPrayers();
+    $("#prayingCount").textContent = active.length ? `(${active.length})` : "";
+    $("#answeredCount").textContent = answered.length ? `(${answered.length})` : "";
+    $$(".prayer-tabs .chip").forEach(c => {
+      c.classList.toggle("active", c.dataset.ptab === prayerTab);
+      c.setAttribute("aria-selected", c.dataset.ptab === prayerTab);
+    });
+    const shown = prayerTab === "praying" ? active : answered;
+
+    // category filter, only worth showing when the list uses more than one category
+    const used = PRAYER_CATS.filter(c => shown.some(p => p.cat === c.id));
+    if (!used.some(c => c.id === prayerFilter)) prayerFilter = "";
+    $("#prayerFilter").hidden = used.length < 2;
+    $("#prayerFilter").innerHTML = used.length < 2 ? "" :
+      `<button class="chip small-chip${prayerFilter ? "" : " active"}" data-pcat="">All</button>` +
+      used.map(c => `<button class="chip small-chip${prayerFilter === c.id ? " active" : ""}" data-pcat="${c.id}">${c.icon} ${escapeHtml(c.name)}</button>`).join("");
+    const list = prayerFilter ? shown.filter(p => p.cat === prayerFilter) : shown;
+
+    const today = $("#prayerToday");
+    today.hidden = prayerTab !== "praying" || !active.length;
+    if (!today.hidden) {
+      const done = active.filter(prayedToday).length;
+      today.innerHTML = `<div class="row between"><strong>${done === active.length ? "You've prayed through your list today 🙏" : `Today: prayed for ${done} of ${active.length}`}</strong></div>
+        <div class="progress"><span style="width:${Math.round(done / active.length * 100)}%"></span></div>
+        <p class="muted small">Tap <strong>🙏 I prayed</strong> as you pray for each one.</p>`;
+    }
+
+    if (!shown.length) {
+      $("#prayerList").innerHTML = prayerTab === "praying"
+        ? `<li class="card empty center"><div class="big-icon">🙏</div><h2>Your prayer list is empty</h2>
+            <p class="muted">Add the people and needs on your heart. Tap “I prayed” each day, and mark requests answered when God answers.</p>
+            <button class="btn" data-pnew>+ Add your first request</button></li>`
+        : `<li class="card empty center"><div class="big-icon">🙌</div><h2>No answered prayers yet</h2>
+            <p class="muted">When God answers a request, tap <strong>Answered</strong> on it and write down what happened. They'll be kept here to remind you of His faithfulness.</p></li>`;
+      return;
+    }
+    $("#prayerList").innerHTML = list.map(p => {
+      const c = prayerCat(p.cat), prayed = prayedToday(p);
+      const head = `<div class="row between"><span class="pill">${c.icon} ${escapeHtml(c.name)}</span>
+          <button class="icon-btn" data-pact="edit" aria-label="Edit request" style="font-size:1.1rem">✎</button></div>
+        <h3>${escapeHtml(p.text)}</h3>
+        ${p.details ? `<p class="prayer-details">${escapeHtml(p.details)}</p>` : ""}
+        ${p.ref ? `<button class="chip" data-ref="${escapeHtml(p.ref)}">📖 ${escapeHtml(p.ref)}</button>` : ""}`;
+      if (p.answered) {
+        const waited = daysBetween(p.created, p.answered.date);
+        return `<li class="card prayer-item answered" data-pid="${p.id}">${head}
+          <p class="answer-line">🙌 Answered ${fmtDay(p.answered.date)}${waited > 0 ? ` · after ${plural(waited, "day")} of prayer` : ""}</p>
+          ${p.answered.note ? `<blockquote class="testimony">${escapeHtml(p.answered.note)}</blockquote>` : ""}
+          <div class="share-actions">
+            <button class="btn ghost small" data-pact="share">Share testimony</button>
+            <button class="btn ghost small" data-pact="unanswer">Still praying</button>
+          </div></li>`;
+      }
+      return `<li class="card prayer-item${prayed ? " prayed" : ""}" data-pid="${p.id}">${head}
+        <p class="muted small">Praying since ${fmtDay(p.created)}${p.count ? ` · prayed ${plural(p.count, "time")}` : ""}</p>
+        <div class="share-actions">
+          <button class="btn small${prayed ? " ghost" : ""}" data-pact="pray" aria-pressed="${prayed}">${prayed ? "✓ Prayed today" : "🙏 I prayed"}</button>
+          <button class="btn ghost small" data-pact="answer">Answered</button>
+          <button class="btn ghost small" data-pact="share">Ask others to pray</button>
+        </div></li>`;
+    }).join("");
+  };
+
+  $(".prayer-tabs").addEventListener("click", e => {
+    const t = e.target.closest("[data-ptab]");
+    if (t) { prayerTab = t.dataset.ptab; prayerFilter = ""; render.prayer(); }
+  });
+  $("#prayerFilter").addEventListener("click", e => {
+    const c = e.target.closest("[data-pcat]");
+    if (c) { prayerFilter = c.dataset.pcat; render.prayer(); }
+  });
+
+  // add / edit
+  const prayerSheet = $("#prayerSheet");
+  let editingPrayer = null;
+  $("#prayerCategory").innerHTML = PRAYER_CATS.map(c => `<option value="${c.id}">${c.icon} ${escapeHtml(c.name)}</option>`).join("");
+  function openPrayerForm(p = null) {
+    editingPrayer = p;
+    $("#prayerSheetTitle").textContent = p ? "Edit prayer request" : "New prayer request";
+    $("#prayerSave").textContent = p ? "Save changes" : "Add to my list";
+    $("#prayerDelete").hidden = !p;
+    $("#prayerText").value = p?.text || "";
+    $("#prayerDetails").value = p?.details || "";
+    $("#prayerCategory").value = p?.cat || (prayerFilter || "family");
+    $("#prayerRef").value = p?.ref || "";
+    prayerSheet.showModal();
+    if (!p) $("#prayerText").focus();
+  }
+  $("#addPrayer").addEventListener("click", () => openPrayerForm());
+  $("#prayerList").addEventListener("click", e => { if (e.target.closest("[data-pnew]")) openPrayerForm(); });
+  $("#prayerCancel").addEventListener("click", () => prayerSheet.close());
+  $("#prayerForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const text = $("#prayerText").value.trim();
+    if (!text) return;
+    let ref = $("#prayerRef").value.trim();
+    if (ref) {
+      const r = parseRef(ref);
+      if (!r) { toast(`Couldn't find “${ref}” in the Bible`); $("#prayerRef").focus(); return; }
+      ref = `${r.book} ${r.chapter}` + (r.from ? `:${r.from}${r.to && r.to !== r.from ? "-" + r.to : ""}` : "");
+    }
+    const fields = { text, details: $("#prayerDetails").value.trim(), cat: $("#prayerCategory").value, ref };
+    if (editingPrayer) Object.assign(editingPrayer, fields);
+    else {
+      state.prayers.unshift({ id: "p" + Date.now().toString(36), ...fields, created: dateKey(new Date()), count: 0, days: [], answered: null });
+      prayerTab = "praying";
+      toast("Added to your prayer list");
+    }
+    save();
+    prayerSheet.close();
+    render.prayer();
+  });
+  $("#prayerDelete").addEventListener("click", () => {
+    if (!editingPrayer || !confirm(`Delete “${editingPrayer.text}” from your prayer list?`)) return;
+    state.prayers = state.prayers.filter(p => p !== editingPrayer);
+    save();
+    prayerSheet.close();
+    render.prayer();
+  });
+
+  // answered
+  const answerSheet = $("#answerSheet");
+  let answeringPrayer = null;
+  $("#answerCancel").addEventListener("click", () => answerSheet.close());
+  $("#answerForm").addEventListener("submit", e => {
+    e.preventDefault();
+    if (!answeringPrayer) return;
+    const date = $("#answerDate").value || dateKey(new Date());
+    answeringPrayer.answered = { date, note: $("#answerNote").value.trim() };
+    save();
+    answerSheet.close();
+    toast("Praise God! 🙌 Saved to your answered prayers");
+    render.prayer();
+  });
+
+  $("#prayerList").addEventListener("click", e => {
+    const btn = e.target.closest("[data-pact]");
+    if (!btn) return;
+    const p = state.prayers.find(x => x.id === btn.closest("[data-pid]")?.dataset.pid);
+    if (!p) return;
+    const action = btn.dataset.pact;
+    if (action === "edit") openPrayerForm(p);
+    else if (action === "pray") {
+      p.days = p.days || [];
+      if (prayedToday(p)) { p.days.pop(); p.count = Math.max(0, (p.count || 0) - 1); }
+      else {
+        p.days.push(dateKey(new Date()));
+        if (p.days.length > 90) p.days.splice(0, p.days.length - 90);
+        p.count = (p.count || 0) + 1;
+      }
+      save(); render.prayer();
+    } else if (action === "answer") {
+      answeringPrayer = p;
+      $("#answerTitle").textContent = p.text;
+      $("#answerDate").value = dateKey(new Date());
+      $("#answerDate").max = dateKey(new Date());
+      $("#answerNote").value = "";
+      answerSheet.showModal();
+    } else if (action === "unanswer") {
+      p.answered = null;
+      save(); render.prayer();
+      toast("Moved back to your prayer list");
+    } else if (action === "share") {
+      const text = p.answered
+        ? `🙌 *God answered prayer!*\n\n${p.text}${p.answered.note ? `\n\n${p.answered.note}` : ""}${p.ref ? `\n\n_${p.ref}_` : ""}\n\nShared from Lamp & Light 📖\n${SITE}`
+        : `🙏 *Please pray with me*\n\n${p.text}${p.ref ? `\n\nStanding on _${p.ref}_` : ""}\n\nShared from Lamp & Light 📖\n${SITE}`;
+      shareViaApps(text);
+    }
   });
 
   /* ================= SETTINGS ================= */
@@ -2370,7 +2587,7 @@
     const when = backup.saved ? new Date(backup.saved).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" }) : "an earlier date";
     const msg = `Restore the backup from ${when}?\n\n` +
       `It has ${n(data.highlights, "highlight")}, ${n(data.bookmarks, "bookmark")}, ${n(data.chapterNotes, "chapter note")}, ` +
-      `${n(data.fastHistory, "completed fast")} and ${n(data.alarms, "reminder")}${data.plan ? ", plus your reading plan" : ""}.\n\n` +
+      `${n(data.prayers, "prayer request")}, ${n(data.fastHistory, "completed fast")} and ${n(data.alarms, "reminder")}${data.plan ? ", plus your reading plan" : ""}.\n\n` +
       "This replaces what is on this device now.";
     if (!confirm(msg)) return;
     state = Object.assign(base, data, { lastBackup: state.lastBackup });
@@ -2424,7 +2641,7 @@
       const kind = e.notification?.extra?.kind;
       stopRing();
       if (kind === "reading") openNextReading();
-      else show(kind === "fast" ? "fast" : kind === "study" ? "study" : "today");
+      else show(kind === "fast" ? "fast" : kind === "study" ? "study" : kind === "prayer" && activePrayers().length ? "prayer" : "today");
     });
     // An alarm going off while the app is open shows the alarm screen
     LN.addListener("localNotificationReceived", n => {
