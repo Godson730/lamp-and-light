@@ -22,7 +22,9 @@
   const defaults = () => ({
     name: "",
     theme: "system",
-    font: 19,
+    font: 19,                // Bible text size (px)
+    lineHeight: 1.8,         // Bible line spacing
+    uiScale: 1,              // text size in the rest of the app
     translation: "kjv",
     last: { book: "John", chapter: 1 },
     highlights: {},          // "John 3:16" -> color
@@ -40,7 +42,8 @@
       { id: "a-evening", label: "Evening prayer", time: "21:00", days: [0, 1, 2, 3, 4, 5, 6], kind: "prayer", enabled: true }
     ],
     fired: {},               // alarmId -> "YYYY-MM-DD HH:MM"
-    snoozes: []              // [{id, label, kind, at}]
+    snoozes: [],             // [{id, label, kind, at}]
+    lastBackup: null         // when a backup file was last saved (ms)
   });
 
   let state = load();
@@ -305,6 +308,7 @@
     fillChapters();
     chapterSelect.value = state.last.chapter;
     $("#translationPill").textContent = state.translation.toUpperCase();
+    if (search.q && search.tr !== state.translation) runSearch();   // translation changed in Settings
     loadChapter();
     renderBookmarks();
   };
@@ -383,7 +387,149 @@
   $("#refForm").addEventListener("submit", e => {
     e.preventDefault();
     const q = $("#refInput").value.trim();
-    if (q) { openRef(q); $("#refInput").blur(); }
+    if (!q) return;
+    $("#refInput").blur();
+    if (looksLikeRef(q)) { closeSearch(); openRef(q); }
+    else runSearch(q);
+  });
+
+  /* ----- word search ----- */
+  // "John 3:16", "Psalm 23" or a whole book name go to the passage; anything else searches the text.
+  function looksLikeRef(q) {
+    if (/\d/.test(q)) return !!parseRef(q);
+    const n = norm(q);
+    return !!(ALIASES[n] || BOOKS.some(b => norm(b.name) === n));
+  }
+  const SEARCH_PAGE = 50, SEARCH_KEEP = 3000;
+  const QUOTES = /^["“”'‘’]+|["“”'‘’]+$/g;
+  const search = { q: "", scope: "all", book: "", tr: "", regs: [], results: [], total: 0, shown: 0, token: 0, lastHit: "" };
+  const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Each word matches the start of a word, so "love" also finds "loved" and "loveth"; "quoted words" must appear together.
+  function searchPatterns(q) {
+    const phrase = /^["“”'‘’].+["“”'‘’]$/.test(q);
+    const words = q.replace(QUOTES, "").toLowerCase().replace(/’/g, "'").split(/[^a-z0-9']+/).filter(Boolean);
+    if (!words.length) return [];
+    if (phrase) return [new RegExp("\\b" + words.map(escRe).join("[^a-z0-9]+"), "i")];
+    return [...new Set(words)].map(w => new RegExp("\\b" + escRe(w), "i"));
+  }
+  function markMatches(text, regs) {
+    const ranges = [];
+    for (const r of regs) {
+      const g = new RegExp(r.source, "gi");
+      let m;
+      while ((m = g.exec(text))) {
+        let end = m.index + m[0].length;
+        while (end < text.length && /[a-z]/i.test(text[end])) end++;   // mark the whole word
+        ranges.push([m.index, end]);
+        if (!m[0].length) g.lastIndex++;
+      }
+    }
+    ranges.sort((a, b) => a[0] - b[0]);
+    let html = "", pos = 0;
+    for (const [a, b] of ranges) {
+      if (b <= pos) continue;
+      const from = Math.max(a, pos);
+      html += escapeHtml(text.slice(pos, from)) + "<mark>" + escapeHtml(text.slice(from, b)) + "</mark>";
+      pos = b;
+    }
+    return html + escapeHtml(text.slice(pos));
+  }
+  function scopeBooks() {
+    if (search.scope === "ot") return BOOKS.slice(0, 39);
+    if (search.scope === "nt") return BOOKS.slice(39);
+    if (search.scope === "book") return BOOKS.filter(b => b.name === search.book);
+    return BOOKS;
+  }
+  const scopeLabel = () => ({ all: "the whole Bible", ot: "the Old Testament", nt: "the New Testament", book: search.book }[search.scope]);
+  async function runSearch(q = search.q) {
+    const regs = searchPatterns(q);
+    if (!regs.length) { toast("Type a word to search for"); return; }
+    const token = ++search.token;
+    Object.assign(search, { q, regs, tr: state.translation, results: [], total: 0, shown: 0 });
+    if (search.scope !== "book") search.book = state.last.book;
+    $("#scopeBook").textContent = search.book;
+    $$("#searchScope .chip").forEach(c => c.classList.toggle("active", c.dataset.scope === search.scope));
+    $("#searchPanel").hidden = false;
+    $("#backToResults").hidden = true;
+    $("#searchTitle").textContent = `Search: “${q.replace(QUOTES, "")}”`;
+    $("#searchResults").innerHTML = "";
+    $("#searchMore").hidden = true;
+    const books = scopeBooks();
+    try {
+      for (let i = 0; i < books.length; i++) {
+        const b = books[i];
+        $("#searchStatus").textContent = `Searching ${b.name}… (${Math.round(i / books.length * 100)}%)`;
+        const chapters = await loadBook(b.name, search.tr);
+        if (token !== search.token) return;           // a newer search started, or search was closed
+        chapters.forEach((verses, c) => verses.forEach((text, v) => {
+          if (!text || !regs.every(r => r.test(text))) return;
+          search.total++;
+          if (search.results.length < SEARCH_KEEP) search.results.push({ book: b.name, c: c + 1, v: v + 1, text: text.replace(/\s+/g, " ").trim() });
+        }));
+        if (!search.shown && search.results.length) showMoreResults();   // show the first matches straight away
+      }
+    } catch (err) {
+      if (token === search.token) $("#searchStatus").textContent = "Couldn't search right now. Please try again.";
+      return;
+    }
+    if (token !== search.token) return;
+    const where = `${scopeLabel()} (${search.tr.toUpperCase()})`;
+    $("#searchStatus").textContent = search.total
+      ? `${search.total.toLocaleString()} verse${search.total === 1 ? "" : "s"} in ${where}` +
+        (search.total > search.results.length ? ` · showing the first ${search.results.length.toLocaleString()}` : "")
+      : `No verses found in ${where}. Check the spelling or try fewer words.`;
+    const book = !/\s/.test(q.replace(QUOTES, "")) && findBook(q.replace(QUOTES, ""));
+    if (book) $("#searchStatus").insertAdjacentHTML("beforeend",
+      ` · <button class="link" data-open-book="${escapeHtml(book.name)}">Open ${escapeHtml(book.name)} instead</button>`);
+    if (search.shown < SEARCH_PAGE) showMoreResults(SEARCH_PAGE - search.shown);   // fill the first page
+  }
+  function showMoreResults(count = SEARCH_PAGE) {
+    const next = search.results.slice(search.shown, search.shown + count);
+    $("#searchResults").insertAdjacentHTML("beforeend", next.map(r => {
+      const ref = `${r.book} ${r.c}:${r.v}`;
+      return `<li tabindex="0" data-hit="${escapeHtml(ref)}"><span class="ref">${escapeHtml(ref)}</span>` +
+        `<span class="text">${markMatches(r.text, search.regs)}</span></li>`;
+    }).join(""));
+    search.shown += next.length;
+    $("#searchMore").hidden = search.shown >= search.results.length;
+  }
+  function closeSearch() {
+    search.token++; search.q = "";
+    $("#searchPanel").hidden = true;
+    $("#backToResults").hidden = true;
+  }
+  function openHit(li) {
+    $("#searchPanel").hidden = true;
+    const btn = $("#backToResults");
+    btn.textContent = `‹ Back to ${search.total.toLocaleString()} result${search.total === 1 ? "" : "s"} for “${search.q.replace(QUOTES, "")}”`;
+    btn.hidden = false;
+    search.lastHit = li.dataset.hit;
+    openRef(li.dataset.hit);
+  }
+  $("#searchResults").addEventListener("click", e => { const li = e.target.closest("[data-hit]"); if (li) openHit(li); });
+  $("#searchResults").addEventListener("keydown", e => {
+    const li = e.target.closest("[data-hit]");
+    if (li && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openHit(li); }
+  });
+  $("#searchMore").addEventListener("click", () => showMoreResults());
+  $("#closeSearch").addEventListener("click", () => { closeSearch(); $("#refInput").value = ""; });
+  $("#searchScope").addEventListener("click", e => {
+    const c = e.target.closest("[data-scope]");
+    if (!c || !search.q) return;
+    search.scope = c.dataset.scope;
+    if (search.scope === "book") search.book = state.last.book;
+    runSearch();
+  });
+  $("#searchStatus").addEventListener("click", e => {
+    const b = e.target.closest("[data-open-book]");
+    if (b) { closeSearch(); openRef(b.dataset.openBook + " 1"); }
+  });
+  $("#backToResults").addEventListener("click", () => {
+    $("#backToResults").hidden = true;
+    $("#searchPanel").hidden = false;
+    const li = search.lastHit && $(`#searchResults [data-hit="${CSS.escape(search.lastHit)}"]`);
+    (li || $("#searchPanel")).scrollIntoView({ block: "center" });
+    if (li) li.focus({ preventScroll: true });
   });
   autosave($("#chapterNotes"), val => {
     const k = `${state.last.book} ${state.last.chapter}`;
@@ -2101,6 +2247,8 @@
     const root = document.documentElement;
     if (state.theme === "system") root.removeAttribute("data-theme"); else root.dataset.theme = state.theme;
     root.style.setProperty("--reader-size", state.font + "px");
+    root.style.setProperty("--reader-line", state.lineHeight || 1.8);
+    root.style.setProperty("--ui-scale", state.uiScale || 1);
     if (SystemBars) {
       const dark = state.theme === "dark" || (state.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
       SystemBars.setStyle({ style: dark ? "DARK" : "LIGHT" }).catch(() => {});
@@ -2112,6 +2260,9 @@
     $("#setTranslation").value = state.translation;
     $("#setTheme").value = state.theme;
     $("#setFont").value = state.font;
+    $("#setUiScale").value = String(state.uiScale || 1);
+    $("#setLineHeight").value = String(state.lineHeight || 1.8);
+    updateBackupStatus();
     $("#setName").value = state.name;
     if (audioSupported) {
       $("#voiceSetting").hidden = false; $("#continueSetting").hidden = false;
@@ -2145,6 +2296,88 @@
     copyText("Lamp & Light — a free Bible study, fasting & prayer app: https://godson730.github.io/lamp-and-light/"));
   $("#setTheme").addEventListener("change", e => { state.theme = e.target.value; applySettings(); save(); });
   $("#setFont").addEventListener("input", e => { state.font = +e.target.value; applySettings(); save(); });
+  $("#setUiScale").addEventListener("change", e => { state.uiScale = +e.target.value; applySettings(); save(); });
+  $("#setLineHeight").addEventListener("change", e => { state.lineHeight = +e.target.value; applySettings(); save(); });
+
+  /* ----- quick text size (the Aa button on the Bible page) ----- */
+  const FONT_MIN = 14, FONT_MAX = 34;
+  const textSheet = $("#textSizeSheet");
+  function syncTextControls() {
+    $("#quickFont").value = state.font;
+    $$("#quickLineHeight .chip").forEach(c => c.classList.toggle("active", +c.dataset.lh === (state.lineHeight || 1.8)));
+    $$("#quickUiScale .chip").forEach(c => c.classList.toggle("active", +c.dataset.scale === (state.uiScale || 1)));
+  }
+  function setText(changes) {
+    Object.assign(state, changes);
+    state.font = Math.min(FONT_MAX, Math.max(FONT_MIN, state.font));
+    applySettings(); save(); syncTextControls();
+  }
+  $("#openTextSize").addEventListener("click", () => { syncTextControls(); textSheet.returnValue = ""; textSheet.showModal(); });
+  $("#fontDown").addEventListener("click", () => setText({ font: state.font - 1 }));
+  $("#fontUp").addEventListener("click", () => setText({ font: state.font + 1 }));
+  $("#quickFont").addEventListener("input", e => setText({ font: +e.target.value }));
+  $("#quickLineHeight").addEventListener("click", e => { const c = e.target.closest("[data-lh]"); if (c) setText({ lineHeight: +c.dataset.lh }); });
+  $("#quickUiScale").addEventListener("click", e => { const c = e.target.closest("[data-scale]"); if (c) setText({ uiScale: +c.dataset.scale }); });
+  $("#resetTextSize").addEventListener("click", () => { const d = defaults(); setText({ font: d.font, lineHeight: d.lineHeight, uiScale: d.uiScale }); });
+
+  /* ----- backup & restore ----- */
+  // Everything the person has made lives in `state`; these are only bookkeeping for alarms already shown.
+  const BACKUP_SKIP = ["fired", "snoozes", "lastBackup"];
+  function updateBackupStatus() {
+    $("#backupStatus").textContent = state.lastBackup
+      ? "Last backup: " + new Date(state.lastBackup).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" })
+      : "You haven't saved a backup yet.";
+  }
+  $("#saveBackup").addEventListener("click", async () => {
+    const data = {};
+    for (const k of Object.keys(state)) if (!BACKUP_SKIP.includes(k)) data[k] = state[k];
+    const json = JSON.stringify({ app: "lamp-and-light", kind: "backup", version: $("#appVersion").textContent, saved: new Date().toISOString(), data });
+    const name = `lamp-and-light-backup-${dateKey(new Date())}.json`;
+    if (NATIVE) {
+      try {
+        const file = await Filesystem.writeFile({ path: name, data: json, directory: "CACHE", encoding: "utf8" });
+        await Share.share({ files: [file.uri], dialogTitle: "Save or send your backup" });
+      } catch (e) {
+        if (!/cancel/i.test(e?.message || "")) toast("Couldn't save the backup");
+        return;
+      }
+    } else {
+      const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+      const link = Object.assign(document.createElement("a"), { href: url, download: name });
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast("Backup saved to your downloads");
+    }
+    state.lastBackup = Date.now(); save(); updateBackupStatus();
+  });
+  $("#restoreBackup").addEventListener("click", () => { $("#restoreFile").value = ""; $("#restoreFile").click(); });
+  $("#restoreFile").addEventListener("change", async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    let backup;
+    try { backup = JSON.parse(await f.text()); } catch (err) { backup = null; }
+    if (!backup || backup.app !== "lamp-and-light" || !backup.data || typeof backup.data !== "object") {
+      toast("That file isn't a Lamp & Light backup"); return;
+    }
+    // Only take values whose type matches what the app expects, so a damaged file can't break the app
+    const base = defaults(), data = {};
+    const kind = v => (Array.isArray(v) ? "array" : v === null ? "null" : typeof v);
+    for (const [k, v] of Object.entries(backup.data)) {
+      if (!(k in base) || BACKUP_SKIP.includes(k)) continue;
+      if (kind(base[k]) === kind(v) || (k === "plan" && (v === null || kind(v) === "object"))) data[k] = v;
+    }
+    const n = (o, word) => { const c = Array.isArray(o) ? o.length : Object.keys(o || {}).length; return `${c} ${word}${c === 1 ? "" : "s"}`; };
+    const when = backup.saved ? new Date(backup.saved).toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" }) : "an earlier date";
+    const msg = `Restore the backup from ${when}?\n\n` +
+      `It has ${n(data.highlights, "highlight")}, ${n(data.bookmarks, "bookmark")}, ${n(data.chapterNotes, "chapter note")}, ` +
+      `${n(data.fastHistory, "completed fast")} and ${n(data.alarms, "reminder")}${data.plan ? ", plus your reading plan" : ""}.\n\n` +
+      "This replaces what is on this device now.";
+    if (!confirm(msg)) return;
+    state = Object.assign(base, data, { lastBackup: state.lastBackup });
+    save();
+    toast("Backup restored");
+    setTimeout(() => location.reload(), 600);   // start fresh so every screen and reminder uses the restored data
+  });
   $("#setName").addEventListener("input", e => { state.name = e.target.value.trim(); save(); });
   $("#setTranslation").addEventListener("change", e => { state.translation = e.target.value; save(); });
   settings.addEventListener("close", () => {

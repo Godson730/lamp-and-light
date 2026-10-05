@@ -77,15 +77,35 @@
     <section class="view" id="view-bible" data-view="bible" hidden>
       <div class="bible-controls">
         <form class="search" id="refForm" autocomplete="off">
-          <input id="refInput" type="search" placeholder="Go to… e.g. John 3:16 or Psalm 23" aria-label="Go to Bible reference">
+          <input id="refInput" type="search" placeholder="John 3:16, Psalm 23 or words like “peace”" aria-label="Go to a Bible reference or search for words">
           <button class="btn" type="submit">Go</button>
         </form>
         <div class="row gap">
           <select id="bookSelect" aria-label="Book"></select>
           <select id="chapterSelect" aria-label="Chapter"></select>
           <span class="pill" id="translationPill">KJV</span>
+          <button class="icon-btn text-size-btn" id="openTextSize" aria-label="Text size and spacing">Aa</button>
         </div>
       </div>
+
+      <!-- word search results (filled by app.js) -->
+      <section class="card search-panel" id="searchPanel" hidden>
+        <div class="row between">
+          <p class="eyebrow" id="searchTitle">Search</p>
+          <button class="icon-btn" id="closeSearch" aria-label="Close search" style="font-size:1.1rem">✕</button>
+        </div>
+        <div class="chips" id="searchScope" role="group" aria-label="Search in">
+          <button class="chip active" data-scope="all">Whole Bible</button>
+          <button class="chip" data-scope="ot">Old Testament</button>
+          <button class="chip" data-scope="nt">New Testament</button>
+          <button class="chip" data-scope="book" id="scopeBook">This book</button>
+        </div>
+        <p class="muted small" id="searchStatus"></p>
+        <ol class="list search-results" id="searchResults"></ol>
+        <button class="btn ghost small" id="searchMore" hidden>Show more</button>
+        <p class="muted small">Tip: put words in quotes to find an exact phrase, e.g. “be still”.</p>
+      </section>
+      <button class="btn ghost small back-to-results" id="backToResults" hidden></button>
 
       <div class="reader-head">
         <button class="icon-btn" id="prevChapter" aria-label="Previous chapter">‹</button>
@@ -308,6 +328,36 @@
   </nav>
 
   <!-- Verse action sheet -->
+  <!-- Quick text size & spacing (the Aa button on the Bible page) -->
+  <dialog id="textSizeSheet" class="sheet">
+    <form method="dialog">
+      <h2>Text size</h2>
+      <p class="muted small">Bible text</p>
+      <div class="row gap size-stepper">
+        <button type="button" class="btn ghost" id="fontDown" aria-label="Smaller Bible text">A−</button>
+        <input type="range" id="quickFont" min="14" max="34" step="1" aria-label="Bible text size">
+        <button type="button" class="btn ghost" id="fontUp" aria-label="Larger Bible text">A+</button>
+      </div>
+      <p class="scripture size-preview" id="sizePreview">Thy word is a lamp unto my feet, and a light unto my path.</p>
+      <p class="muted small">Line spacing</p>
+      <div class="chips" id="quickLineHeight" role="group" aria-label="Line spacing">
+        <button type="button" class="chip" data-lh="1.5">Compact</button>
+        <button type="button" class="chip" data-lh="1.8">Normal</button>
+        <button type="button" class="chip" data-lh="2.1">Relaxed</button>
+      </div>
+      <p class="muted small">Text in the rest of the app</p>
+      <div class="chips" id="quickUiScale" role="group" aria-label="App text size">
+        <button type="button" class="chip" data-scale="1">Normal</button>
+        <button type="button" class="chip" data-scale="1.12">Large</button>
+        <button type="button" class="chip" data-scale="1.25">Extra large</button>
+      </div>
+      <div class="row between" style="margin-top:16px">
+        <button type="button" class="btn ghost small" id="resetTextSize">Reset</button>
+        <button value="close" class="btn">Done</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="verseSheet" class="sheet">
     <form method="dialog">
       <p class="eyebrow" id="verseSheetRef"></p>
@@ -467,8 +517,22 @@
             <option value="dark">Dark</option>
           </select>
         </label>
-        <label>Text size
-          <input type="range" id="setFont" min="15" max="26" step="1">
+        <label>Bible text size
+          <input type="range" id="setFont" min="14" max="34" step="1">
+        </label>
+        <label>App text size
+          <select id="setUiScale">
+            <option value="1">Normal</option>
+            <option value="1.12">Large</option>
+            <option value="1.25">Extra large</option>
+          </select>
+        </label>
+        <label>Line spacing
+          <select id="setLineHeight">
+            <option value="1.5">Compact</option>
+            <option value="1.8">Normal</option>
+            <option value="2.1">Relaxed</option>
+          </select>
         </label>
         <label class="span-2">Reminder sound
           <span class="row gap">
@@ -490,6 +554,18 @@
           <input id="setName" maxlength="40" placeholder="Optional">
         </label>
       </div>
+      <div class="notice backup-box">
+        <p class="small"><strong>Back up your notes</strong><br>
+          <span class="muted">Your highlights, bookmarks, notes, journals, reading plan, fasting record and reminders are kept only
+          on this device. Save a backup file and keep it somewhere safe (send it to yourself on WhatsApp or email) so you can
+          restore everything on a new phone.</span></p>
+        <p class="small muted" id="backupStatus"></p>
+        <div class="row gap wrap">
+          <button type="button" class="btn small" id="saveBackup">Save backup</button>
+          <button type="button" class="btn ghost small" id="restoreBackup">Restore from backup</button>
+          <input type="file" id="restoreFile" accept=".json,application/json,text/plain,*/*" hidden>
+        </div>
+      </div>
       <p class="muted small">
         <strong>About the NKJV:</strong> the New King James Version is copyrighted by HarperCollins Christian Publishing and
         can only be included in an app with their permission. Lamp &amp; Light uses the public-domain KJV and WEB texts. If you
@@ -507,7 +583,7 @@
         <span>Invite others: <strong>godson730.github.io/lamp-and-light</strong></span>
         <button type="button" class="btn ghost small" id="shareApp">Copy link</button>
       </div>
-      <p class="muted small">Version <span id="appVersion">2.3.0</span></p>
+      <p class="muted small">Version <span id="appVersion">2.4.0</span></p>
       <div class="row between">
         <button value="reset" class="btn danger ghost" id="resetAll">Reset all data</button>
         <button value="close" class="btn">Done</button>

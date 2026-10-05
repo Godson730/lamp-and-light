@@ -16,6 +16,8 @@
   --hl-pink: #f5d0d8;
   --shadow: 0 1px 2px rgba(60, 40, 20, .06), 0 6px 20px rgba(60, 40, 20, .06);
   --reader-size: 19px;
+  --reader-line: 1.8;
+  --ui-scale: 1;          /* "App text size" setting; every size below is in rem/em so the whole app follows */
   /* Android app sets --safe-area-inset-*; browsers use env() */
   --inset-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
   --inset-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
@@ -44,10 +46,11 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { font-size: calc(var(--ui-scale) * 100%); }
 body {
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.55 var(--sans);
+  font: .9375rem/1.55 var(--sans);
   -webkit-font-smoothing: antialiased;
   padding-bottom: calc(76px + var(--inset-bottom));
 }
@@ -148,7 +151,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; f
 .reader-head { display: flex; align-items: center; justify-content: space-between; margin: 8px 0 4px; }
 .reader-head h1 { margin: 0; text-align: center; }
 .reader {
-  font-family: var(--serif); font-size: var(--reader-size); line-height: 1.8;
+  font-family: var(--serif); font-size: var(--reader-size); line-height: var(--reader-line);
   background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin-bottom: 10px;
   min-height: 200px;
 }
@@ -417,3 +420,24 @@ dialog::backdrop { background: rgba(20, 12, 6, .45); backdrop-filter: blur(2px);
   .alarm .time { font-size: 1.5rem; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- text size ---------- */
+.text-size-btn { font-family: var(--serif); font-size: 1.15rem; font-weight: 600; flex: none; border: 1px solid var(--line); }
+.size-stepper input { flex: 1; }
+.size-preview { font-size: var(--reader-size); line-height: var(--reader-line); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; margin: 12px 0; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip.active:hover { color: var(--accent-ink); }
+
+/* ---------- word search ---------- */
+.search-panel .chips { margin: 4px 0 10px; }
+.search-results li { display: block; cursor: pointer; padding: 10px 4px; border-radius: 8px; }
+.search-results li:hover, .search-results li:focus-visible { background: var(--surface-2); }
+.search-results .ref { font-weight: 600; color: var(--accent); font-size: .9rem; }
+.search-results .text { display: block; font-family: var(--serif); line-height: 1.55; margin-top: 2px; }
+.search-results mark { background: var(--hl-yellow); color: inherit; border-radius: 3px; padding: 0 1px; }
+.search-progress { height: 4px; }
+.back-to-results { display: block; margin: 0 auto 8px; }
+
+/* ---------- backup ---------- */
+.backup-box { margin-bottom: 12px; }
+.backup-box p { margin-bottom: 8px; }

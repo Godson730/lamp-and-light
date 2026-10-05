@@ -10,7 +10,10 @@ import {
   initializeFirestore, connectFirestoreEmulator, doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection,
   collectionGroup, query, where, orderBy, limit, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, getDocs
 } from "./vendor/firebase/firebase-firestore.js";
-import { firebaseConfig, emulatorConfig } from "./firebase-config.js";
+import {
+  getStorage, connectStorageEmulator, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject
+} from "./vendor/firebase/firebase-storage.js";
+import { firebaseConfig, emulatorConfig, videoStorage } from "./firebase-config.js";
 
 const LL = window.LL;
 const $ = (s, r = document) => r.querySelector(s);
@@ -23,16 +26,20 @@ const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 let useEmulator = false;
 try { useEmulator = !LL.NATIVE && location.port === "8766" && localStorage.getItem("ll-use-emulator") === "1"; } catch (e) { /* storage blocked */ }
 const config = useEmulator ? emulatorConfig : firebaseConfig;
-let auth = null, db = null;
+let auth = null, db = null, storage = null;
+const fullVideos = !!videoStorage || useEmulator;      // full-length videos need Firebase Storage
 if (config) {
   const app = initializeApp(config);
   auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
   db = initializeFirestore(app, {});
+  if (fullVideos) storage = getStorage(app);
   if (useEmulator) {
     connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
     connectFirestoreEmulator(db, "127.0.0.1", 8085);
+    if (storage) connectStorageEmulator(storage, "127.0.0.1", 9199);
   }
 }
+const MAX_VIDEO_MB = 200, MAX_VIDEO_MINUTES = 10;
 
 const S = {
   authReady: false, user: null, profile: null, profileLoaded: false,
@@ -582,7 +589,83 @@ async function shrinkVideo(file, onProgress) {
   }
 }
 
+/* ----- full-length videos (Firebase Storage) ----- */
+// Grabs a frame to use as the chat thumbnail, and reads the video's size
+async function videoPoster(file) {
+  const url = URL.createObjectURL(file);
+  const video = Object.assign(document.createElement("video"), { src: url, muted: true, playsInline: true, preload: "metadata" });
+  try {
+    await new Promise((res, rej) => {
+      video.onloadeddata = res;
+      video.onerror = () => rej(new Error("unreadable"));
+      setTimeout(() => rej(new Error("unreadable")), 15000);
+    });
+    await new Promise(res => { video.onseeked = res; video.currentTime = Math.min(0.5, (video.duration || 1) / 3); setTimeout(res, 3000); });
+    const w0 = video.videoWidth || 640, h0 = video.videoHeight || 360;
+    const scale = Math.min(1, 640 / Math.max(w0, h0));
+    const w = Math.round(w0 * scale), h = Math.round(h0 * scale);
+    const canvas = Object.assign(document.createElement("canvas"), { width: w, height: h });
+    canvas.getContext("2d").drawImage(video, 0, 0, w, h);
+    return { poster: canvas.toDataURL("image/jpeg", 0.6), w: w0, h: h0, dur: Number.isFinite(video.duration) ? video.duration : 0 };
+  } finally { URL.revokeObjectURL(url); }
+}
+
+async function uploadFullVideo(file) {
+  const mb = file.size / (1024 * 1024);
+  if (mb > MAX_VIDEO_MB) { LL.toast(`That video is ${Math.round(mb)} MB. Videos up to ${MAX_VIDEO_MB} MB can be sent.`); return; }
+  let info;
+  try { info = await videoPoster(file); }
+  catch (e) { LL.toast("Couldn't read that video"); return; }
+  if (info.dur > MAX_VIDEO_MINUTES * 60 + 5) {
+    LL.toast(`That video is ${Math.round(info.dur / 60)} minutes. Videos up to ${MAX_VIDEO_MINUTES} minutes can be sent.`);
+    return;
+  }
+  let cancelled = false, task = null;
+  const dlg = openDialog(`
+    <p class="eyebrow">Send video</p>
+    <img class="photo-preview" src="${info.poster}" alt="First frame of the video">
+    <form id="fullVideoForm" class="stack">
+      <label>Caption (optional) <input id="fullCaption" maxlength="500" placeholder="Say something about it"></label>
+      <p class="muted small">${Math.round(info.dur) ? Math.floor(info.dur / 60) + "m " + Math.round(info.dur % 60) + "s · " : ""}${mb.toFixed(1)} MB · only members of this group can see it.</p>
+      <div class="progress" id="upWrap" hidden><span id="upBar" style="width:2%"></span></div>
+      <p class="muted small" id="upNote" hidden>Uploading… keep the app open.</p>
+      <div class="share-actions"><button class="btn" type="submit" id="upSend">Send video</button><button type="button" class="btn ghost" data-close>Cancel</button></div>
+    </form>`, d => {
+    $("#fullVideoForm", d).addEventListener("submit", async e => {
+      e.preventDefault();
+      const caption = $("#fullCaption", d).value.trim();
+      $("#upSend", d).disabled = true;
+      $("#upWrap", d).hidden = false; $("#upNote", d).hidden = false;
+      const gid = S.current;
+      const msgRef = doc(collection(db, "groups", gid, "messages"));
+      const ext = (file.name.match(/\.([a-z0-9]{2,5})$/i)?.[1] || (file.type.includes("mp4") ? "mp4" : "webm")).toLowerCase();
+      const path = `groups/${gid}/videos/${msgRef.id}.${ext}`;
+      try {
+        task = uploadBytesResumable(storageRef(storage, path), file, { contentType: file.type || "video/mp4", customMetadata: { uid: S.user.uid } });
+        await new Promise((res, rej) => {
+          task.on("state_changed",
+            snap => { const bar = $("#upBar", d); if (bar) bar.style.width = `${Math.max(2, Math.round(snap.bytesTransferred / snap.totalBytes * 100))}%`; },
+            rej, res);
+        });
+        if (cancelled) { await deleteObject(storageRef(storage, path)).catch(() => {}); return; }
+        const batch = writeBatch(db);
+        batch.set(msgRef, { uid: S.user.uid, name: myName(), text: caption, kind: "video", w: info.w, h: info.h, dur: Math.round(info.dur * 10) / 10 || 0, path, size: file.size, createdAt: serverTimestamp() });
+        batch.set(doc(db, "groups", gid, "photos", msgRef.id), { uid: S.user.uid, image: info.poster, createdAt: serverTimestamp() });
+        await batch.commit();
+        photoCache.set(msgRef.id, info.poster);
+        LL.toast("Video sent");
+        d.close();
+      } catch (err) {
+        console.warn(err);
+        $("#upSend", d).disabled = false; $("#upWrap", d).hidden = true; $("#upNote", d).hidden = true;
+        LL.toast(err?.code === "storage/unauthorized" ? "You don't have permission to send videos here" : "Upload failed. Check your connection and try again.");
+      }
+    });
+  }, () => { cancelled = true; task?.cancel?.(); });
+}
+
 async function handleVideoPick(file) {
+  if (fullVideos && storage) { uploadFullVideo(file); return; }
   if (!recorderType()) { LL.toast("This device can't prepare videos. Try sending a photo instead."); return; }
   let cancelled = false;
   const dlg = openDialog(`
@@ -634,6 +717,13 @@ function confirmVideo(clip) {
 
 async function viewVideo(m) {
   let src = videoCache.get(m.id);
+  if (!src && m.path && storage) {
+    LL.toast("Loading video…");
+    try {
+      src = await getDownloadURL(storageRef(storage, m.path));
+      videoCache.set(m.id, src);
+    } catch (e) { LL.toast("That video is no longer available"); return; }
+  }
   if (!src) {
     LL.toast("Loading video…");
     try {
@@ -651,7 +741,19 @@ async function viewVideo(m) {
       <button type="button" class="btn ghost" id="videoShare">Share / save</button>
       <button type="button" class="btn ghost" data-close>Close</button>
     </div>`, dlg => {
-    $("#videoShare", dlg).addEventListener("click", () => LL.shareMedia(src, `video-${m.id}`, `Video from ${m.name}`));
+    $("#videoShare", dlg).addEventListener("click", async () => {
+      if (!/^data:/.test(src)) {
+        if ((m.size || 0) > 100 * 1024 * 1024) { LL.toast("That video is too large to share from here"); return; }
+        LL.toast("Preparing…");
+        try {
+          const blob = await (await fetch(src)).blob();
+          const asData = await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+          LL.shareMedia(asData, `video-${m.id}`, `Video from ${m.name}`);
+        } catch (e) { LL.toast("Couldn't prepare that video"); }
+        return;
+      }
+      LL.shareMedia(src, `video-${m.id}`, `Video from ${m.name}`);
+    });
   });
 }
 
@@ -740,6 +842,7 @@ async function deleteMessage(gid, m) {
   if (m.kind === "photo" || m.kind === "video") batch.delete(doc(db, "groups", gid, "photos", m.id));
   if (m.kind === "video") batch.delete(doc(db, "groups", gid, "videos", m.id));
   await batch.commit();
+  if (m.path && storage) await deleteObject(storageRef(storage, m.path)).catch(() => {});
   photoCache.delete(m.id); videoCache.delete(m.id);
 }
 async function postMessage({ text, kind, ref }) {
@@ -1002,7 +1105,9 @@ function renderMembers(pane) {
   $$("[data-report-dismiss]", pane).forEach(b => b.addEventListener("click", () => run(() => deleteDoc(doc(db, "groups", S.current, "reports", b.dataset.reportDismiss)), "Report dismissed")));
   $$("[data-report-delete]", pane).forEach(b => b.addEventListener("click", async () => {
     const r = S.reports.find(x => x.id === b.dataset.reportDelete);
+    const reported = S.messages.find(x => x.id === r.targetId);
     await run(async () => {
+      if (reported?.path && storage) await deleteObject(storageRef(storage, reported.path)).catch(() => {});
       const b2 = writeBatch(db);
       b2.delete(doc(db, "groups", S.current, r.targetType === "prayer" ? "prayers" : "messages", r.targetId));
       if (r.targetType === "message") {
@@ -1068,6 +1173,13 @@ async function deleteDocsIn(refs) {
 }
 async function wipeGroup(gid, inviteCode) {
   const sub = async name => (await getDocs(collection(db, "groups", gid, name))).docs.map(d => d.ref);
+  if (storage) {
+    const msgs = await getDocs(collection(db, "groups", gid, "messages"));
+    for (const m of msgs.docs) {
+      const path = m.data().path;
+      if (path) await deleteObject(storageRef(storage, path)).catch(() => {});
+    }
+  }
   await deleteDocsIn([...await sub("messages"), ...await sub("photos"), ...await sub("videos"), ...await sub("prayers"), ...await sub("reports"), ...await sub("bans")]);
   const members = (await getDocs(collection(db, "groups", gid, "members"))).docs;
   await deleteDocsIn(members.filter(d => d.id !== S.user.uid).map(d => d.ref));
@@ -1150,6 +1262,12 @@ function deleteAccountFlow() {
           } catch (err) { /* no longer a member */ }
         }
         const mineQ = name => getDocs(query(collectionGroup(db, name), where("uid", "==", user.uid)));
+        if (storage) {
+          for (const m of (await mineQ("messages")).docs) {
+            const path = m.data().path;
+            if (path) await deleteObject(storageRef(storage, path)).catch(() => {});
+          }
+        }
         await deleteDocsIn([...(await mineQ("messages")).docs.map(d => d.ref), ...(await mineQ("photos")).docs.map(d => d.ref), ...(await mineQ("videos")).docs.map(d => d.ref), ...(await mineQ("prayers")).docs.map(d => d.ref)]);
         await deleteDocsIn((await mineQ("members")).docs.map(d => d.ref));
         await deleteDocsIn((await getDocs(collection(db, "users", user.uid, "blocked"))).docs.map(d => d.ref));
